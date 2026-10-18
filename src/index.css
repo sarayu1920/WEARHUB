@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-900: #0d281e;
+  --color-brand-800: #12372A;
+  --color-brand-700: #1E4D2B;
+  --color-brand-600: #2D6A4F;
+  --color-brand-500: #40916C;
+  --color-brand-400: #52B788;
+  --color-brand-300: #74C69D;
+  --color-brand-200: #B7E4C7;
+  --color-brand-100: #D8F3DC;
+  --color-brand-50: #F3F9F5;
+  --color-brand-cream: #FAF9F6;
+  --color-brand-sand: #F3EFE0;
+  --color-brand-terracotta: #E07A5F;
+  --color-brand-softamber: #F4A261;
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  background-color: #FAF9F6;
+  color: #1a201c;
+  min-height: 100vh;
+}
+
+.font-serif-title {
+  font-family: 'Playfair Display', Georgia, serif;
+}
+
+/* Smooth transitions & cards */
+.badge-sustainable {
+  background: linear-gradient(135deg, #12372A 0%, #2D6A4F 100%);
+}
+
+.glass-nav {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Subtle custom scrollbar */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: #F3F9F5;
+}
+::-webkit-scrollbar-thumb {
+  background: #B7E4C7;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #40916C;
+}

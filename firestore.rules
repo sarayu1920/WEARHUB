@@ -1,0 +1,67 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // User profiles: Anyone signed in can read basic profiles, but only the owner can update
+    match /users/{userId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update, delete: if isOwner(userId);
+    }
+
+    // Listings: Public read, authenticated users can create, only owner can edit/delete
+    match /listings/{listingId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && resource.data.ownerId == request.auth.uid;
+    }
+
+    // Requests: Public read, authenticated users can create, only author can edit/delete
+    match /requests/{requestId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && request.resource.data.requesterId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && resource.data.requesterId == request.auth.uid;
+
+      // Responses to requests
+      match /responses/{responseId} {
+        allow read: if true;
+        allow create: if isAuthenticated() && request.resource.data.responderId == request.auth.uid;
+        allow update, delete: if isAuthenticated() && resource.data.responderId == request.auth.uid;
+      }
+    }
+
+    // Borrow requests: Only owner of listing or the requester can read/update
+    match /borrowRequests/{borrowId} {
+      allow read: if isAuthenticated() && (
+        resource.data.requesterId == request.auth.uid || 
+        resource.data.ownerId == request.auth.uid
+      );
+      allow create: if isAuthenticated() && request.resource.data.requesterId == request.auth.uid;
+      allow update: if isAuthenticated() && (
+        resource.data.requesterId == request.auth.uid || 
+        resource.data.ownerId == request.auth.uid
+      );
+      allow delete: if isAuthenticated() && resource.data.requesterId == request.auth.uid;
+    }
+
+    // Conversations & Messages: Only participants can read and write
+    match /conversations/{conversationId} {
+      allow read, write: if isAuthenticated() && request.auth.uid in resource.data.participantIds;
+      allow create: if isAuthenticated() && request.auth.uid in request.resource.data.participantIds;
+
+      match /messages/{messageId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() && request.resource.data.senderId == request.auth.uid;
+      }
+    }
+  }
+}
