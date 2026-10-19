@@ -64,12 +64,35 @@ export const DEMO_USERS: UserProfile[] = [
   },
 ];
 
+const PREVIEW_USERS_KEY = 'wearhub_preview_users';
+const ACTIVE_USER_KEY = 'wearhub_active_user';
+const LOGGED_OUT_KEY = 'wearhub_logged_out';
+
+const getStoredPreviewUsers = (): UserProfile[] => {
+  try {
+    const saved = localStorage.getItem(PREVIEW_USERS_KEY);
+    return saved ? JSON.parse(saved) : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveStoredPreviewUser = (user: UserProfile) => {
+  try {
+    const current = getStoredPreviewUsers();
+    const filtered = current.filter((u) => u.email.toLowerCase() !== user.email.toLowerCase());
+    localStorage.setItem(PREVIEW_USERS_KEY, JSON.stringify([user, ...filtered]));
+  } catch (err) {
+    console.error('Failed to save preview user:', err);
+  }
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const isFirebaseReady = isFirebaseConfigured();
 
-  // Load user session from Firebase if configured, or check demo user state
+  // Load user session from Firebase if configured, or restore preview session
   useEffect(() => {
     if (isFirebaseReady && auth) {
       const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -82,11 +105,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               if (userDoc.exists()) {
                 setCurrentUser(userDoc.data() as UserProfile);
               } else {
-                // Initialize profile if new
+                // Initialize profile if not found
                 const newProfile: UserProfile = {
                   uid: user.uid,
                   email: user.email || '',
-                  displayName: user.displayName || 'Student',
+                  displayName: user.displayName || 'Campus Student',
                   photoURL: user.photoURL || '',
                   homeUniversity: 'VIT-AP University',
                   savedListingIds: [],
@@ -107,17 +130,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       return () => unsubscribe();
     } else {
-      // In demo/test mode without Firebase keys
-      const savedDemo = sessionStorage.getItem('wearhub_demo_user');
-      if (savedDemo) {
+      // In preview/demo mode without live Firebase keys
+      const savedActive = sessionStorage.getItem(ACTIVE_USER_KEY) || sessionStorage.getItem('wearhub_demo_user');
+      const isLoggedOut = sessionStorage.getItem(LOGGED_OUT_KEY);
+
+      if (savedActive && !isLoggedOut) {
         try {
-          setCurrentUser(JSON.parse(savedDemo));
+          setCurrentUser(JSON.parse(savedActive));
         } catch {
           setCurrentUser(null);
         }
-      } else {
-        // By default, start as guest or demo user
+      } else if (!isLoggedOut) {
+        // By default, start with Arjun Verma on initial exploration
         setCurrentUser(DEMO_USERS[0]);
+        sessionStorage.setItem(ACTIVE_USER_KEY, JSON.stringify(DEMO_USERS[0]));
+      } else {
+        setCurrentUser(null);
       }
       setLoading(false);
     }
@@ -131,36 +159,64 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     homeUniversity: string
   ) => {
     setLoading(true);
+    const emailNormalized = email.trim().toLowerCase();
+    const trimmedName = fullName.trim();
+
     try {
       if (!isFirebaseReady || !auth || !db) {
-        // Demo mode fallback
+        // Check for duplicate account in preview accounts
+        const allPreviewUsers = [...DEMO_USERS, ...getStoredPreviewUsers()];
+        const exists = allPreviewUsers.some((u) => u.email.toLowerCase() === emailNormalized);
+        if (exists) {
+          const err: any = new Error('An account with this email already exists. Please log in.');
+          err.code = 'auth/email-already-in-use';
+          throw err;
+        }
+
+        // Create new preview user (NEVER store plaintext password)
         const mockUser: UserProfile = {
-          uid: 'user-' + Date.now(),
-          email,
-          displayName: fullName,
+          uid: 'preview-user-' + Date.now(),
+          email: emailNormalized,
+          displayName: trimmedName,
           homeUniversity,
           savedListingIds: [],
           createdAt: new Date().toISOString(),
         };
+
+        saveStoredPreviewUser(mockUser);
+        sessionStorage.removeItem(LOGGED_OUT_KEY);
+        sessionStorage.setItem(ACTIVE_USER_KEY, JSON.stringify(mockUser));
         setCurrentUser(mockUser);
-        sessionStorage.setItem('wearhub_demo_user', JSON.stringify(mockUser));
         return;
       }
 
-      const cred = await createUserWithEmailAndPassword(auth, email, password);
-      await updateProfile(cred.user, { displayName: fullName });
+      // Live Firebase registration
+      const cred = await createUserWithEmailAndPassword(auth, emailNormalized, password);
+      await updateProfile(cred.user, { displayName: trimmedName });
 
       const newProfile: UserProfile = {
         uid: cred.user.uid,
-        email,
-        displayName: fullName,
+        email: cred.user.email || emailNormalized,
+        displayName: trimmedName,
         homeUniversity,
         photoURL: cred.user.photoURL || '',
         savedListingIds: [],
         createdAt: new Date().toISOString(),
       };
 
-      await setDoc(doc(db, 'users', cred.user.uid), newProfile);
+      // Save to Firestore, rollback auth user if profile creation fails to prevent orphaned auth accounts
+      try {
+        await setDoc(doc(db, 'users', cred.user.uid), newProfile);
+      } catch (firestoreErr) {
+        console.error('Failed to create Firestore profile document. Rolling back auth user:', firestoreErr);
+        try {
+          await cred.user.delete();
+        } catch (cleanupErr) {
+          console.warn('Could not delete orphaned auth user:', cleanupErr);
+        }
+        throw new Error('Database error: Unable to create user profile in Firestore. Please try again.');
+      }
+
       setCurrentUser(newProfile);
     } finally {
       setLoading(false);
@@ -170,26 +226,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Sign in with Email/Password
   const signIn = async (email: string, password: string) => {
     setLoading(true);
+    const emailNormalized = email.trim().toLowerCase();
+
     try {
       if (!isFirebaseReady || !auth || !db) {
-        // Check if demo user
-        const mockUser: UserProfile = {
-          uid: 'user-' + Date.now(),
-          email,
-          displayName: email.split('@')[0],
+        // Find user in preview users
+        const allPreviewUsers = [...DEMO_USERS, ...getStoredPreviewUsers()];
+        const matched = allPreviewUsers.find((u) => u.email.toLowerCase() === emailNormalized);
+
+        if (!matched) {
+          const err: any = new Error('Invalid email or password. Please check your credentials and try again.');
+          err.code = 'auth/invalid-credential';
+          throw err;
+        }
+
+        sessionStorage.removeItem(LOGGED_OUT_KEY);
+        sessionStorage.setItem(ACTIVE_USER_KEY, JSON.stringify(matched));
+        setCurrentUser(matched);
+        return;
+      }
+
+      // Live Firebase authentication
+      const cred = await signInWithEmailAndPassword(auth, emailNormalized, password);
+      const userDocRef = doc(db, 'users', cred.user.uid);
+      const userDoc = await getDoc(userDocRef);
+
+      if (userDoc.exists()) {
+        setCurrentUser(userDoc.data() as UserProfile);
+      } else {
+        // Fallback profile if user document doesn't exist
+        const fallbackProfile: UserProfile = {
+          uid: cred.user.uid,
+          email: cred.user.email || emailNormalized,
+          displayName: cred.user.displayName || emailNormalized.split('@')[0],
           homeUniversity: 'VIT-AP University',
           savedListingIds: [],
           createdAt: new Date().toISOString(),
         };
-        setCurrentUser(mockUser);
-        sessionStorage.setItem('wearhub_demo_user', JSON.stringify(mockUser));
-        return;
-      }
-
-      const cred = await signInWithEmailAndPassword(auth, email, password);
-      const userDoc = await getDoc(doc(db, 'users', cred.user.uid));
-      if (userDoc.exists()) {
-        setCurrentUser(userDoc.data() as UserProfile);
+        await setDoc(userDocRef, fallbackProfile);
+        setCurrentUser(fallbackProfile);
       }
     } finally {
       setLoading(false);
@@ -201,27 +276,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLoading(true);
     try {
       if (!isFirebaseReady || !auth || !db) {
-        const mockUser: UserProfile = {
-          ...DEMO_USERS[0],
-          displayName: 'Google Campus User',
-        };
-        setCurrentUser(mockUser);
-        sessionStorage.setItem('wearhub_demo_user', JSON.stringify(mockUser));
-        return;
+        // Clearly report that Google sign-in requires live Firebase configuration
+        throw new Error(
+          'Google sign-in requires live Firebase configuration. In Preview Mode, Google sign-in is disabled. Please configure Firebase credentials or use the preview test accounts.'
+        );
       }
 
       const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+
       const cred = await signInWithPopup(auth, provider);
       const userDocRef = doc(db, 'users', cred.user.uid);
       const userDoc = await getDoc(userDocRef);
 
       if (userDoc.exists()) {
+        // Existing user: preserve existing profile data
         setCurrentUser(userDoc.data() as UserProfile);
       } else {
+        // New Google user: initialize profile document
         const newProfile: UserProfile = {
           uid: cred.user.uid,
           email: cred.user.email || '',
-          displayName: cred.user.displayName || 'Student',
+          displayName: cred.user.displayName || 'Campus Student',
           photoURL: cred.user.photoURL || '',
           homeUniversity: 'VIT-AP University',
           savedListingIds: [],
@@ -240,16 +316,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (isFirebaseReady && auth) {
       await signOut(auth);
     }
+    sessionStorage.removeItem(ACTIVE_USER_KEY);
     sessionStorage.removeItem('wearhub_demo_user');
+    sessionStorage.setItem(LOGGED_OUT_KEY, 'true');
     setCurrentUser(null);
   };
 
   // Password Reset
   const resetPassword = async (email: string) => {
+    const emailNormalized = email.trim().toLowerCase();
     if (isFirebaseReady && auth) {
-      await sendPasswordResetEmail(auth, email);
+      await sendPasswordResetEmail(auth, emailNormalized);
     } else {
-      console.log('Demo mode password reset simulated for:', email);
+      // Preview mode simulation
+      console.log('Preview Mode: Password reset link simulated for:', emailNormalized);
     }
   };
 
@@ -267,25 +347,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.error('Failed to update home university in Firestore:', err);
       }
     } else {
-      sessionStorage.setItem('wearhub_demo_user', JSON.stringify(updated));
+      sessionStorage.setItem(ACTIVE_USER_KEY, JSON.stringify(updated));
+      saveStoredPreviewUser(updated);
     }
   };
 
-  // Update Profile Data
+  // Update Profile Data (Never allow modifying immutable uid or email)
   const updateProfileData = async (data: Partial<UserProfile>) => {
     if (!currentUser) return;
 
-    const updated = { ...currentUser, ...data };
+    // Disallow modifying uid or email
+    const { uid: _uid, email: _email, ...allowedUpdates } = data;
+    const updated = { ...currentUser, ...allowedUpdates };
     setCurrentUser(updated);
 
     if (isFirebaseReady && db) {
       try {
-        await updateDoc(doc(db, 'users', currentUser.uid), data);
+        await updateDoc(doc(db, 'users', currentUser.uid), allowedUpdates);
       } catch (err) {
         console.error('Failed to update user profile in Firestore:', err);
       }
     } else {
-      sessionStorage.setItem('wearhub_demo_user', JSON.stringify(updated));
+      sessionStorage.setItem(ACTIVE_USER_KEY, JSON.stringify(updated));
+      saveStoredPreviewUser(updated);
     }
   };
 
@@ -309,15 +393,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.error('Failed to update saved listings in Firestore:', err);
       }
     } else {
-      sessionStorage.setItem('wearhub_demo_user', JSON.stringify(updatedUser));
+      sessionStorage.setItem(ACTIVE_USER_KEY, JSON.stringify(updatedUser));
+      saveStoredPreviewUser(updatedUser);
     }
   };
 
-  // Quick switch for demo testing
+  // Quick switch for demo testing (strictly disabled in production with Firebase)
   const loginAsDemoUser = (index: number = 0) => {
+    if (isFirebaseReady) {
+      console.warn('Demo user switcher is strictly disabled when live Firebase is active.');
+      return;
+    }
     const user = DEMO_USERS[index % DEMO_USERS.length];
+    sessionStorage.removeItem(LOGGED_OUT_KEY);
+    sessionStorage.setItem(ACTIVE_USER_KEY, JSON.stringify(user));
     setCurrentUser(user);
-    sessionStorage.setItem('wearhub_demo_user', JSON.stringify(user));
   };
 
   return (

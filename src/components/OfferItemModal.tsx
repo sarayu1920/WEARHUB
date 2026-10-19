@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { ItemRequest } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useRequests } from '../context/RequestContext';
@@ -28,6 +29,44 @@ export const OfferItemModal: React.FC<OfferItemModalProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   if (!isOpen || !request) return null;
+
+  if (!currentUser) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-900/60 backdrop-blur-xs">
+        <div className="bg-white rounded-3xl max-w-sm w-full p-6 text-center space-y-4 shadow-xl border border-neutral-200 animate-fadeIn relative">
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 p-1.5 rounded-lg text-neutral-400 hover:text-neutral-600 hover:bg-neutral-100"
+            aria-label="Close dialog"
+          >
+            <X className="w-5 h-5" />
+          </button>
+          <div className="w-12 h-12 mx-auto rounded-2xl bg-emerald-50 text-[#12372A] flex items-center justify-center">
+            <Gift className="w-6 h-6 text-emerald-700" />
+          </div>
+          <h3 className="text-base font-bold text-neutral-900">Sign in to Offer Items</h3>
+          <p className="text-xs text-neutral-500 leading-relaxed">
+            Please log in or create a student account to respond to student requests and coordinate item handoff.
+          </p>
+          <div className="pt-2 flex flex-col gap-2">
+            <Link
+              to="/auth?redirect=/requests"
+              onClick={onClose}
+              className="w-full py-2.5 rounded-xl bg-[#12372A] hover:bg-[#1E4D2B] text-white text-xs font-bold transition-colors"
+            >
+              Sign In / Create Account
+            </Link>
+            <button
+              onClick={onClose}
+              className="w-full py-2 rounded-xl text-xs text-neutral-500 hover:text-neutral-700 font-semibold"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

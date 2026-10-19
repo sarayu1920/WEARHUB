@@ -38,6 +38,7 @@ export const DashboardPage: React.FC = () => {
     updateProfileData,
     updateHomeUniversity,
     loginAsDemoUser,
+    isFirebaseReady,
   } = useAuth();
   const {
     listings,
@@ -207,31 +208,33 @@ export const DashboardPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Demo Switcher Quick Pill */}
-        <div className="mt-6 pt-4 border-t border-neutral-150 flex flex-wrap items-center justify-between text-xs text-neutral-500 gap-2">
-          <div className="flex items-center space-x-2">
-            <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Test Mode Switcher:</span>
-            <button
-              onClick={() => loginAsDemoUser(0)}
-              className="text-[11px] underline text-[#12372A] font-semibold hover:text-[#2D6A4F]"
-            >
-              Switch to Arjun (VIT-AP)
-            </button>
-            <span>&bull;</span>
-            <button
-              onClick={() => loginAsDemoUser(1)}
-              className="text-[11px] underline text-[#12372A] font-semibold hover:text-[#2D6A4F]"
-            >
-              Switch to Priya (SRM AP)
-            </button>
+        {/* Demo Switcher Quick Pill (Strictly disabled in live Firebase mode) */}
+        {!isFirebaseReady && (
+          <div className="mt-6 pt-4 border-t border-neutral-150 flex flex-wrap items-center justify-between text-xs text-neutral-500 gap-2">
+            <div className="flex items-center space-x-2">
+              <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Preview Mode Test Accounts:</span>
+              <button
+                onClick={() => loginAsDemoUser(0)}
+                className="text-[11px] underline text-[#12372A] font-semibold hover:text-[#2D6A4F]"
+              >
+                Switch to Arjun (VIT-AP)
+              </button>
+              <span>&bull;</span>
+              <button
+                onClick={() => loginAsDemoUser(1)}
+                className="text-[11px] underline text-[#12372A] font-semibold hover:text-[#2D6A4F]"
+              >
+                Switch to Priya (SRM AP)
+              </button>
+            </div>
+            {statusMessage && (
+              <span className="text-emerald-700 font-bold bg-emerald-50 px-2.5 py-1 rounded-lg">
+                {statusMessage}
+              </span>
+            )}
           </div>
-          {statusMessage && (
-            <span className="text-emerald-700 font-bold bg-emerald-50 px-2.5 py-1 rounded-lg">
-              {statusMessage}
-            </span>
-          )}
-        </div>
+        )}
       </div>
 
       {/* Edit Profile Form (Expanded if editing) */}

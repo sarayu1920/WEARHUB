@@ -109,12 +109,18 @@ Follow these steps to connect your own live Firebase project:
 2. Click **Add project** and name it (e.g. `wearhub-campus`).
 3. Disable Google Analytics (optional) and click **Create Project**.
 
-### Step 2: Enable Authentication Providers
+### Step 2: Enable Authentication Providers & Authorize Netlify Domain
 1. In the Firebase console left menu, click **Build > Authentication**.
 2. Click **Get Started**.
 3. Under the **Sign-in method** tab:
-   - Enable **Email/Password**.
-   - Enable **Google** (set your support email and click Save).
+   - Enable **Email/Password** > click **Save**.
+   - Click **Add new provider** > choose **Google**:
+     - Toggle **Enable**.
+     - Set **Project public-facing name** (e.g. `WEARHUB`).
+     - Select a **Project support email** and click **Save**.
+4. In the **Settings** tab under **Authorized domains**:
+   - Verify `localhost` is listed.
+   - Click **Add domain** and enter your deployed Netlify domain (e.g., `wearhub.netlify.app`). This is required for Google OAuth popup verification.
 
 ### Step 3: Create Cloud Firestore Database
 1. In the left menu, click **Build > Firestore Database**.
