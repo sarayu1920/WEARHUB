@@ -117,8 +117,15 @@ export const DashboardPage: React.FC = () => {
   };
 
   const handleDeleteRequest = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this request?')) {
-      await deleteRequest(id);
+    if (window.confirm('Are you sure you want to delete this request? This action cannot be undone.')) {
+      try {
+        const res = await deleteRequest(id);
+        setStatusMessage(res.message);
+        setTimeout(() => setStatusMessage(null), 3500);
+      } catch (err: any) {
+        setStatusMessage(err.message || 'Failed to delete request.');
+        setTimeout(() => setStatusMessage(null), 3500);
+      }
     }
   };
 
@@ -425,20 +432,13 @@ export const DashboardPage: React.FC = () => {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 {myRequests.map((req) => (
-                  <div key={req.id} className="relative group">
-                    <RequestCard
-                      request={req}
-                      onOffer={() => {}}
-                      onViewResponses={(r) => setSelectedRequestForResponses(r)}
-                    />
-                    <button
-                      onClick={() => handleDeleteRequest(req.id)}
-                      className="absolute top-4 right-4 p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 transition-colors"
-                      title="Delete request"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+                  <RequestCard
+                    key={req.id}
+                    request={req}
+                    onOffer={() => {}}
+                    onViewResponses={(r) => setSelectedRequestForResponses(r)}
+                    onDelete={() => handleDeleteRequest(req.id)}
+                  />
                 ))}
               </div>
             )}

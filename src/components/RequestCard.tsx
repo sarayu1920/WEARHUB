@@ -1,18 +1,52 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { ItemRequest } from '../types';
-import { Calendar, MapPin, Tag, MessageCircle, Gift, Clock, Sparkles } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import {
+  Calendar,
+  MapPin,
+  Tag,
+  MessageCircle,
+  Gift,
+  Trash2,
+  MoreVertical,
+  UserCheck,
+} from 'lucide-react';
 
 interface RequestCardProps {
   request: ItemRequest;
   onOffer: (request: ItemRequest) => void;
   onViewResponses?: (request: ItemRequest) => void;
+  onDelete?: (request: ItemRequest) => void;
 }
 
 export const RequestCard: React.FC<RequestCardProps> = ({
   request,
   onOffer,
   onViewResponses,
+  onDelete,
 }) => {
+  const { currentUser } = useAuth();
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Ownership strictly determined by authenticated UID
+  const isOwner = Boolean(currentUser && currentUser.uid === request.requesterId);
+
+  // Close dropdown menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setIsMenuOpen(false);
+      }
+    };
+    if (isMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isMenuOpen]);
+
   const isUrgent = () => {
     const needed = new Date(request.dateNeeded).getTime();
     const now = new Date().getTime();
@@ -21,14 +55,22 @@ export const RequestCard: React.FC<RequestCardProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-neutral-200/90 p-5 shadow-xs hover:shadow-md transition-all duration-300 flex flex-col justify-between">
+    <div className="bg-white rounded-2xl border border-neutral-200/90 p-5 shadow-xs hover:shadow-md transition-all duration-300 flex flex-col justify-between relative group">
       <div>
         {/* Top Badges */}
         <div className="flex items-center justify-between gap-2 mb-3">
-          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-[#D8F3DC] text-[#12372A]">
-            <Tag className="w-3 h-3 mr-1" />
-            {request.preferredType}
-          </span>
+          <div className="flex items-center space-x-1.5 flex-wrap">
+            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-[#D8F3DC] text-[#12372A]">
+              <Tag className="w-3 h-3 mr-1" />
+              {request.preferredType}
+            </span>
+            {isOwner && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#12372A] text-emerald-200 border border-[#2D6A4F]/40">
+                <UserCheck className="w-3 h-3 mr-1" />
+                Your Request
+              </span>
+            )}
+          </div>
 
           <div className="flex items-center space-x-2">
             {isUrgent() && (
@@ -40,6 +82,56 @@ export const RequestCard: React.FC<RequestCardProps> = ({
               <Calendar className="w-3.5 h-3.5 mr-1 text-neutral-400" />
               By {request.dateNeeded}
             </span>
+
+            {/* Three-dot menu for Request Owner */}
+            {isOwner && (
+              <div className="relative" ref={menuRef}>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsMenuOpen((prev) => !prev);
+                  }}
+                  className="p-1 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors"
+                  title="Request Options"
+                  aria-label="Request Options"
+                  aria-expanded={isMenuOpen}
+                >
+                  <MoreVertical className="w-4 h-4" />
+                </button>
+
+                {isMenuOpen && (
+                  <div className="absolute right-0 top-full mt-1 w-44 bg-white rounded-xl shadow-lg border border-neutral-200 py-1.5 z-30 animate-fadeIn">
+                    {onViewResponses && request.responsesCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsMenuOpen(false);
+                          onViewResponses(request);
+                        }}
+                        className="w-full text-left px-3 py-2 text-xs font-medium text-neutral-700 hover:bg-neutral-50 flex items-center space-x-2 transition-colors"
+                      >
+                        <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>View Offers ({request.responsesCount})</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsMenuOpen(false);
+                        if (onDelete) onDelete(request);
+                      }}
+                      className="w-full text-left px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 flex items-center space-x-2 transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                      <span>Delete Request</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -81,10 +173,12 @@ export const RequestCard: React.FC<RequestCardProps> = ({
               />
             ) : (
               <div className="w-5 h-5 rounded-full bg-[#12372A] text-white flex items-center justify-center text-[10px] font-bold">
-                {request.requesterName[0]}
+                {request.requesterName ? request.requesterName[0] : 'S'}
               </div>
             )}
-            <span className="font-semibold text-neutral-700 truncate">{request.requesterName}</span>
+            <span className="font-semibold text-neutral-700 truncate">
+              {isOwner ? 'You' : request.requesterName}
+            </span>
           </div>
 
           <div className="flex items-center text-[#2D6A4F] font-semibold text-xs ml-2 truncate">
@@ -93,26 +187,45 @@ export const RequestCard: React.FC<RequestCardProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center justify-between pt-1">
+        <div className="flex items-center justify-between pt-1 gap-2">
           {request.responsesCount > 0 ? (
             <button
-              onClick={() => onViewResponses ? onViewResponses(request) : null}
+              type="button"
+              onClick={() => (onViewResponses ? onViewResponses(request) : null)}
               className="text-xs font-semibold text-[#12372A] hover:text-[#2D6A4F] flex items-center space-x-1"
             >
               <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
               <span>{request.responsesCount} Offer(s)</span>
             </button>
           ) : (
-            <span className="text-[11px] text-neutral-400">Be the first to offer!</span>
+            <span className="text-[11px] text-neutral-400">
+              {isOwner ? 'No offers yet' : 'Be the first to offer!'}
+            </span>
           )}
 
-          <button
-            onClick={() => onOffer(request)}
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-[#12372A] hover:bg-[#1E4D2B] text-white text-xs font-bold shadow-xs hover:shadow-md transition-all"
-          >
-            <Gift className="w-3.5 h-3.5 text-emerald-300" />
-            <span>Offer Item</span>
-          </button>
+          {/* Action button based on ownership */}
+          {isOwner ? (
+            <div className="flex items-center space-x-2">
+              <button
+                type="button"
+                onClick={() => (onDelete ? onDelete(request) : null)}
+                className="flex items-center space-x-1 px-3 py-1.5 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition-all shadow-2xs"
+                title="Delete your request"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                <span>Delete Request</span>
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onOffer(request)}
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-[#12372A] hover:bg-[#1E4D2B] text-white text-xs font-bold shadow-xs hover:shadow-md transition-all"
+            >
+              <Gift className="w-3.5 h-3.5 text-emerald-300" />
+              <span>Offer Item</span>
+            </button>
+          )}
         </div>
       </div>
     </div>

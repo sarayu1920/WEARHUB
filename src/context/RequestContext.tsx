@@ -12,13 +12,19 @@ import {
   doc,
 } from '../services/firebase';
 
+export interface DeleteRequestResult {
+  success: boolean;
+  isPermanent: boolean;
+  message: string;
+}
+
 interface RequestContextType {
   requests: ItemRequest[];
   loading: boolean;
   createRequest: (
     newRequest: Omit<ItemRequest, 'id' | 'createdAt' | 'requesterId' | 'requesterName' | 'requesterEmail' | 'requesterUniversity' | 'responsesCount'>
   ) => Promise<string>;
-  deleteRequest: (id: string) => Promise<boolean>;
+  deleteRequest: (id: string) => Promise<DeleteRequestResult>;
   respondToRequest: (
     requestId: string,
     message: string,
@@ -37,6 +43,17 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [userCreatedRequests, setUserCreatedRequests] = useState<ItemRequest[]>(() => {
     const saved = localStorage.getItem('wearhub_custom_requests');
     return saved ? JSON.parse(saved) : [];
+  });
+  const [deletedRequestIds, setDeletedRequestIds] = useState<string[]>(() => {
+    const saved = localStorage.getItem('wearhub_deleted_request_ids');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {
+        return [];
+      }
+    }
+    return [];
   });
   const [firestoreRequests, setFirestoreRequests] = useState<ItemRequest[]>([]);
   const [responses, setResponses] = useState<RequestResponse[]>(() => {
@@ -72,6 +89,10 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [userCreatedRequests]);
 
   useEffect(() => {
+    localStorage.setItem('wearhub_deleted_request_ids', JSON.stringify(deletedRequestIds));
+  }, [deletedRequestIds]);
+
+  useEffect(() => {
     localStorage.setItem('wearhub_request_responses', JSON.stringify(responses));
   }, [responses]);
 
@@ -102,7 +123,7 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     ...firestoreRequests,
     ...userCreatedRequests,
     ...SAMPLE_REQUESTS,
-  ];
+  ].filter((r) => !deletedRequestIds.includes(r.id));
 
   const getRequestById = (id: string): ItemRequest | undefined => {
     return requests.find((r) => r.id === id);
@@ -143,20 +164,45 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return generatedId;
   };
 
-  const deleteRequest = async (id: string): Promise<boolean> => {
-    if (!currentUser) return false;
+  const deleteRequest = async (id: string): Promise<DeleteRequestResult> => {
+    if (!currentUser) {
+      throw new Error('You must be signed in to delete a request.');
+    }
+
+    const targetRequest = requests.find((r) => r.id === id);
+    if (!targetRequest) {
+      throw new Error('Request not found or has already been removed.');
+    }
+
+    // Strict ownership enforcement by authenticated UID
+    if (targetRequest.requesterId !== currentUser.uid) {
+      throw new Error('Unauthorized: You can only delete requests created by your own account.');
+    }
+
+    let isPermanent = false;
 
     if (isFirebaseConfigured() && db) {
       try {
         await deleteDoc(doc(db, 'requests', id));
         setFirestoreRequests((prev) => prev.filter((r) => r.id !== id));
-      } catch (err) {
+        isPermanent = true;
+      } catch (err: any) {
         console.error('Error deleting request from Firestore:', err);
+        throw new Error(err.message || 'Failed to delete request from Firestore database.');
       }
     }
 
+    // Persist deletion locally for preview / sample / custom data
     setUserCreatedRequests((prev) => prev.filter((r) => r.id !== id));
-    return true;
+    setDeletedRequestIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+
+    return {
+      success: true,
+      isPermanent,
+      message: isPermanent
+        ? 'Request deleted permanently from database.'
+        : 'Request deleted successfully (Preview Mode).',
+    };
   };
 
   const respondToRequest = async (

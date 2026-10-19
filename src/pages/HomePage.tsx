@@ -29,7 +29,7 @@ import {
 export const HomePage: React.FC = () => {
   const navigate = useNavigate();
   const { listings, filterListings } = useListings();
-  const { requests } = useRequests();
+  const { requests, deleteRequest } = useRequests();
   const { activeBrowseFilter, getEffectiveUniversityFilter } = useUniversity();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -304,6 +304,11 @@ export const HomePage: React.FC = () => {
                   key={req.id}
                   request={req}
                   onOffer={(r) => setSelectedOfferRequest(r)}
+                  onDelete={async (r) => {
+                    if (window.confirm('Are you sure you want to delete this request? This action cannot be undone.')) {
+                      await deleteRequest(r.id);
+                    }
+                  }}
                 />
               ))}
             </div>
