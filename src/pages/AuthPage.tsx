@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useSearchParams, useNavigate, useLocation, Link } from 'react-router-dom';
+import { useSearchParams, useNavigate, useLocation, Link, Navigate } from 'react-router-dom';
 import { useAuth, DEMO_USERS } from '../context/AuthContext';
 import { useUniversity } from '../context/UniversityContext';
 import {
@@ -63,53 +63,32 @@ export const AuthPage: React.FC = () => {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isEmailAlreadyRegistered, setIsEmailAlreadyRegistered] = useState(false);
+  const [isUserUnregistered, setIsUserUnregistered] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Determine redirection target (from location state, search param, or default to /profile)
-  const redirectTarget =
-    (location.state as any)?.from?.pathname || searchParams.get('redirect') || '/profile';
+  // Determine redirection target (defaulting to Home page `/`)
+  const fromState = (location.state as any)?.from?.pathname;
+  const redirectParam = searchParams.get('redirect');
+  const rawTarget = redirectParam || fromState || '/';
+  const redirectTarget = rawTarget === '/auth' ? '/' : rawTarget;
 
   useEffect(() => {
     setIsSignUp(searchParams.get('mode') === 'signup');
     setError(null);
     setIsEmailAlreadyRegistered(false);
+    setIsUserUnregistered(false);
   }, [searchParams]);
 
-  // If already logged in, show status or let user redirect
+  // If already authenticated, redirect directly to intended destination or Home page
   if (currentUser) {
-    return (
-      <div className="min-h-[75vh] flex items-center justify-center px-4 py-12">
-        <div className="max-w-md w-full bg-white p-8 rounded-3xl border border-neutral-200/90 shadow-sm text-center space-y-4">
-          <div className="w-16 h-16 mx-auto rounded-full bg-emerald-100 flex items-center justify-center text-[#12372A]">
-            <CheckCircle2 className="w-8 h-8 text-emerald-700" />
-          </div>
-          <h2 className="text-xl font-bold text-neutral-900">Already Signed In</h2>
-          <p className="text-xs text-neutral-600">
-            You are currently signed in as <strong>{currentUser.displayName}</strong> ({currentUser.email}).
-          </p>
-          <div className="pt-2 flex flex-col sm:flex-row gap-2 justify-center">
-            <Link
-              to={redirectTarget}
-              className="px-5 py-2.5 rounded-xl bg-[#12372A] hover:bg-[#1E4D2B] text-white text-xs font-bold transition-colors"
-            >
-              Continue to {redirectTarget === '/profile' ? 'Profile' : 'Page'}
-            </Link>
-            <Link
-              to="/"
-              className="px-5 py-2.5 rounded-xl border border-neutral-300 text-neutral-700 hover:bg-neutral-50 text-xs font-bold transition-colors"
-            >
-              Go to Home
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
+    return <Navigate to={redirectTarget} replace />;
   }
 
   const handleToggleMode = (signUpMode: boolean) => {
     setIsSignUp(signUpMode);
     setError(null);
     setIsEmailAlreadyRegistered(false);
+    setIsUserUnregistered(false);
     setSuccessMessage(null);
 
     const newParams = new URLSearchParams(searchParams);
@@ -128,6 +107,13 @@ export const AuthPage: React.FC = () => {
     }
   };
 
+  const switchToSignUpWithEmail = (emailToPreserve?: string) => {
+    handleToggleMode(true);
+    if (emailToPreserve) {
+      setEmail(emailToPreserve);
+    }
+  };
+
   const validateEmailFormat = (val: string): boolean => {
     const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return re.test(val.trim());
@@ -137,6 +123,7 @@ export const AuthPage: React.FC = () => {
     e.preventDefault();
     setError(null);
     setIsEmailAlreadyRegistered(false);
+    setIsUserUnregistered(false);
     setSuccessMessage(null);
 
     const emailTrimmed = email.trim();
@@ -148,7 +135,7 @@ export const AuthPage: React.FC = () => {
     }
 
     if (!validateEmailFormat(emailTrimmed)) {
-      setError('Please enter a valid email address (e.g. student@college.edu.in or personal email).');
+      setError('Please enter a valid email address.');
       return;
     }
 
@@ -201,23 +188,31 @@ export const AuthPage: React.FC = () => {
         // Required exact text: "An account with this email already exists. Please log in."
         setError('An account with this email already exists. Please log in.');
         setIsEmailAlreadyRegistered(true);
+      } else if (code === 'auth/user-not-found' || rawMsg.includes('not registered yet') || rawMsg.includes('user-not-found')) {
+        // Unregistered email requirement: exact text and blue register link
+        setError("You’re not registered yet. Please create an account to continue.");
+        setIsUserUnregistered(true);
+      } else if (code === 'auth/wrong-password') {
+        setError('Incorrect email or password. Please try again.');
       } else if (
         code === 'auth/invalid-credential' ||
-        code === 'auth/wrong-password' ||
-        code === 'auth/user-not-found' ||
-        rawMsg.includes('Invalid email or password')
+        code === 'auth/invalid-login-credentials' ||
+        rawMsg.includes('Invalid email or password') ||
+        rawMsg.includes('Incorrect email or password')
       ) {
-        setError('Invalid email or password. Please check your credentials and try again.');
+        setError('Incorrect email or password. Please try again.');
       } else if (code === 'auth/weak-password' || rawMsg.includes('weak-password')) {
         setError('Password is too weak. Please use at least 6 characters.');
       } else if (code === 'auth/invalid-email' || rawMsg.includes('invalid-email')) {
         setError('Please enter a valid email address.');
       } else if (code === 'auth/too-many-requests') {
         setError('Too many unsuccessful attempts. Access temporarily restricted for security. Please try again later or reset your password.');
+      } else if (code === 'auth/network-request-failed' || rawMsg.includes('network') || rawMsg.includes('Network')) {
+        setError('Network connection error. Please verify your internet connection and try again.');
+      } else if (code === 'auth/internal-error' || rawMsg.includes('internal error') || rawMsg.includes('server')) {
+        setError('Server error encountered. Please try again in a few moments.');
       } else if (code === 'auth/operation-not-allowed') {
         setError('Email/Password sign-in is not enabled in Firebase Console. Please enable it in Firebase Console > Authentication > Sign-in method.');
-      } else if (code === 'auth/network-request-failed') {
-        setError('Network connection error. Please verify your internet connection.');
       } else {
         setError(rawMsg || 'Authentication failed. Please verify your credentials.');
       }
@@ -230,6 +225,7 @@ export const AuthPage: React.FC = () => {
     setGoogleLoading(true);
     setError(null);
     setIsEmailAlreadyRegistered(false);
+    setIsUserUnregistered(false);
 
     try {
       await signInWithGoogle();
@@ -348,7 +344,7 @@ export const AuthPage: React.FC = () => {
                 type="button"
                 onClick={() => {
                   loginAsDemoUser(0);
-                  navigate(redirectTarget);
+                  navigate(redirectTarget, { replace: true });
                 }}
                 className="text-[11px] font-bold px-3 py-1.5 bg-amber-200/80 hover:bg-amber-300/90 text-amber-950 rounded-xl transition-colors shadow-2xs"
               >
@@ -358,7 +354,7 @@ export const AuthPage: React.FC = () => {
                 type="button"
                 onClick={() => {
                   loginAsDemoUser(1);
-                  navigate(redirectTarget);
+                  navigate(redirectTarget, { replace: true });
                 }}
                 className="text-[11px] font-bold px-3 py-1.5 bg-amber-200/80 hover:bg-amber-300/90 text-amber-950 rounded-xl transition-colors shadow-2xs"
               >
@@ -411,13 +407,28 @@ export const AuthPage: React.FC = () => {
             </div>
           )}
 
-          {/* Error Banner with Inline Switch to Login Link if Duplicate Email */}
+          {/* Error Banner with Inline Switch to Login Link if Duplicate Email or Register Link if Unregistered */}
           {error && (
             <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs space-y-2 animate-fadeIn">
               <div className="flex items-start space-x-2 font-medium">
                 <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
                 <span className="leading-relaxed">{error}</span>
               </div>
+
+              {/* Unregistered user: Display blue Register now link immediately below error message */}
+              {isUserUnregistered && !isSignUp && (
+                <div className="pt-0.5 pl-6">
+                  <button
+                    type="button"
+                    onClick={() => switchToSignUpWithEmail(email)}
+                    className="text-blue-600 hover:text-blue-800 font-bold text-xs underline underline-offset-2 transition-colors cursor-pointer inline-flex items-center space-x-1"
+                  >
+                    <span>Register now</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Duplicate Email in registration: switch to login with email */}
               {isEmailAlreadyRegistered && isSignUp && (
                 <div className="pt-1 pl-6">
                   <button

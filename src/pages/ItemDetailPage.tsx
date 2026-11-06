@@ -23,6 +23,8 @@ import {
   AlertCircle,
   Leaf,
   MessageSquare,
+  Laptop,
+  Cloud,
 } from 'lucide-react';
 
 export const ItemDetailPage: React.FC = () => {
@@ -100,7 +102,13 @@ export const ItemDetailPage: React.FC = () => {
             <span>{copiedShare ? 'Link Copied!' : 'Share Item'}</span>
           </button>
           <button
-            onClick={() => toggleSaveListing(listing.id)}
+            onClick={() => {
+              if (!currentUser) {
+                navigate(`/auth?redirect=${encodeURIComponent(`/item/${listing.id}`)}`);
+                return;
+              }
+              toggleSaveListing(listing.id);
+            }}
             className={`flex items-center space-x-1 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-colors ${
               isSaved
                 ? 'bg-rose-50 text-rose-600 border-rose-200'
@@ -184,7 +192,29 @@ export const ItemDetailPage: React.FC = () => {
                   Verified Campus Listing
                 </span>
               )}
+              {listing.isLocalPrototype && (
+                <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-violet-100 text-violet-800 flex items-center border border-violet-200">
+                  <Laptop className="w-3 h-3 mr-1 text-violet-600" />
+                  Local Prototype
+                </span>
+              )}
+              {!listing.isLocalPrototype && !listing.isSample && (
+                <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-emerald-50 text-emerald-800 flex items-center border border-emerald-200">
+                  <Cloud className="w-3 h-3 mr-1 text-emerald-600" />
+                  Shared via Firebase
+                </span>
+              )}
             </div>
+
+            {/* Local Prototype banner */}
+            {listing.isLocalPrototype && (
+              <div className="p-3 rounded-2xl bg-violet-50/80 border border-violet-200 text-violet-900 text-xs flex items-center space-x-2.5 mt-3">
+                <Laptop className="w-4 h-4 text-violet-600 flex-shrink-0" />
+                <span>
+                  <strong>Local Prototype Listing:</strong> This listing and photo are saved directly in your browser's persistent storage. It survives page refreshes without needing paid Firebase Storage.
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Pricing & Transaction Cards */}

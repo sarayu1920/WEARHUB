@@ -63,6 +63,7 @@ export interface Listing {
   status: 'available' | 'reserved' | 'completed';
   createdAt: string;
   isSample?: boolean;
+  isLocalPrototype?: boolean;
   views?: number;
 }
 
@@ -171,3 +172,10 @@ export interface FilterOptions {
   maxPrice?: number;
   sortBy: 'newest' | 'price-asc' | 'price-desc' | 'popular';
 }
+
+export interface DeleteListingResult {
+  success: boolean;
+  isPermanent: boolean;
+  message: string;
+}
+

@@ -1,8 +1,8 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Listing } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { Heart, MapPin, Repeat, Gift, Clock, Sparkles } from 'lucide-react';
+import { Heart, MapPin, Repeat, Gift, Clock, Sparkles, Laptop, Cloud } from 'lucide-react';
 
 interface ProductCardProps {
   listing: Listing;
@@ -10,12 +10,17 @@ interface ProductCardProps {
 }
 
 export const ProductCard: React.FC<ProductCardProps> = ({ listing, onQuickBorrow }) => {
+  const navigate = useNavigate();
   const { currentUser, toggleSaveListing } = useAuth();
   const isSaved = currentUser?.savedListingIds?.includes(listing.id);
 
   const handleFavoriteClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (!currentUser) {
+      navigate('/auth');
+      return;
+    }
     toggleSaveListing(listing.id);
   };
 
@@ -36,18 +41,32 @@ export const ProductCard: React.FC<ProductCardProps> = ({ listing, onQuickBorrow
           loading="lazy"
         />
 
-        {/* Favorite Heart Button */}
-        <button
-          onClick={handleFavoriteClick}
-          aria-label={isSaved ? 'Remove from saved' : 'Save item'}
-          className={`absolute top-3 right-3 p-2 rounded-full backdrop-blur-md transition-all shadow-sm ${
-            isSaved
-              ? 'bg-rose-500 text-white'
-              : 'bg-white/80 hover:bg-white text-neutral-600 hover:text-rose-500'
-          }`}
-        >
-          <Heart className={`w-4 h-4 ${isSaved ? 'fill-current' : ''}`} />
-        </button>
+        {/* Favorite Heart Button & Storage Status Indicator */}
+        <div className="absolute top-3 right-3 flex items-center space-x-1.5 z-10">
+          {listing.isLocalPrototype ? (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-700/90 text-white backdrop-blur-md shadow-xs">
+              <Laptop className="w-2.5 h-2.5 mr-1" />
+              Local Prototype
+            </span>
+          ) : !listing.isSample ? (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-800/80 text-white backdrop-blur-md shadow-xs">
+              <Cloud className="w-2.5 h-2.5 mr-1 text-emerald-300" />
+              Firebase
+            </span>
+          ) : null}
+
+          <button
+            onClick={handleFavoriteClick}
+            aria-label={isSaved ? 'Remove from saved' : 'Save item'}
+            className={`p-1.5 rounded-full backdrop-blur-md transition-all shadow-sm ${
+              isSaved
+                ? 'bg-rose-500 text-white'
+                : 'bg-white/80 hover:bg-white text-neutral-600 hover:text-rose-500'
+            }`}
+          >
+            <Heart className={`w-3.5 h-3.5 ${isSaved ? 'fill-current' : ''}`} />
+          </button>
+        </div>
 
         {/* Transaction Badges */}
         <div className="absolute top-3 left-3 flex flex-wrap gap-1.5 max-w-[80%]">
@@ -165,14 +184,30 @@ export const ProductCard: React.FC<ProductCardProps> = ({ listing, onQuickBorrow
           )}
         </div>
 
-        {/* Sample tag indicator */}
-        {listing.isSample && (
+        {/* Local prototype vs Cloud tag indicator */}
+        {listing.isLocalPrototype ? (
+          <div className="mt-2 pt-1 border-t border-dashed border-violet-200 flex items-center justify-between text-[10px] text-violet-700">
+            <span className="flex items-center font-semibold">
+              <Laptop className="w-2.5 h-2.5 mr-1 text-violet-600" />
+              Local Prototype Listing
+            </span>
+            <span className="text-violet-500">Saved in browser</span>
+          </div>
+        ) : listing.isSample ? (
           <div className="mt-2 pt-1 border-t border-dashed border-neutral-150 flex items-center justify-between text-[10px] text-neutral-400">
             <span className="flex items-center">
               <Sparkles className="w-2.5 h-2.5 mr-1 text-emerald-600" />
               Verified Campus Item
             </span>
             <span>By {listing.ownerName}</span>
+          </div>
+        ) : (
+          <div className="mt-2 pt-1 border-t border-dashed border-emerald-100 flex items-center justify-between text-[10px] text-emerald-700">
+            <span className="flex items-center font-medium">
+              <Cloud className="w-2.5 h-2.5 mr-1 text-emerald-600" />
+              Shared via Firebase
+            </span>
+            <span className="text-neutral-400">By {listing.ownerName}</span>
           </div>
         )}
       </div>

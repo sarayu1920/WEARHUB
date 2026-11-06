@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useListings } from '../context/ListingContext';
 import { useRequests } from '../context/RequestContext';
@@ -8,7 +8,9 @@ import { ProductCard } from '../components/ProductCard';
 import { RequestCard } from '../components/RequestCard';
 import { ViewResponsesModal } from '../components/ViewResponsesModal';
 import { OfferItemModal } from '../components/OfferItemModal';
-import { ItemRequest } from '../types';
+import { DeleteListingModal } from '../components/DeleteListingModal';
+import { DeleteConfirmModal } from '../components/DeleteConfirmModal';
+import { Listing, ItemRequest } from '../types';
 import {
   User,
   ShoppingBag,
@@ -28,10 +30,19 @@ import {
   Check,
   ShieldCheck,
   PlusCircle,
+  Laptop,
+  Cloud,
+  ExternalLink,
+  Tag,
+  AlertTriangle,
 } from 'lucide-react';
 
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+
   const {
     currentUser,
     logout,
@@ -51,7 +62,29 @@ export const DashboardPage: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<
     'listings' | 'requests' | 'borrowing' | 'lending' | 'saved' | 'settings'
-  >('listings');
+  >(() => {
+    if (location.pathname === '/my-listings') return 'listings';
+    if (tabParam && ['listings', 'requests', 'borrowing', 'lending', 'saved', 'settings'].includes(tabParam)) {
+      return tabParam as any;
+    }
+    return 'listings';
+  });
+
+  useEffect(() => {
+    if (location.pathname === '/my-listings') {
+      setActiveTab('listings');
+      return;
+    }
+    const tab = searchParams.get('tab');
+    if (tab && ['listings', 'requests', 'borrowing', 'lending', 'saved', 'settings'].includes(tab)) {
+      setActiveTab(tab as any);
+    }
+  }, [searchParams, location.pathname]);
+
+  const handleTabChange = (newTab: 'listings' | 'requests' | 'borrowing' | 'lending' | 'saved' | 'settings') => {
+    setActiveTab(newTab);
+    setSearchParams({ tab: newTab });
+  };
 
   // Edit profile state
   const [isEditing, setIsEditing] = useState(false);
@@ -64,6 +97,15 @@ export const DashboardPage: React.FC = () => {
 
   // Response viewing modal
   const [selectedRequestForResponses, setSelectedRequestForResponses] = useState<ItemRequest | null>(null);
+
+  // Deletion modals state
+  const [listingToDelete, setListingToDelete] = useState<Listing | null>(null);
+  const [isDeletingListing, setIsDeletingListing] = useState<boolean>(false);
+  const [deleteListingError, setDeleteListingError] = useState<string | null>(null);
+
+  const [requestToDelete, setRequestToDelete] = useState<ItemRequest | null>(null);
+  const [isDeletingRequest, setIsDeletingRequest] = useState<boolean>(false);
+  const [deleteRequestError, setDeleteRequestError] = useState<string | null>(null);
 
   if (!currentUser) {
     return (
@@ -85,7 +127,7 @@ export const DashboardPage: React.FC = () => {
     );
   }
 
-  // Filter user's specific data
+  // Filter user's specific data by authenticated UID strictly
   const myListings = listings.filter((l) => l.ownerId === currentUser.uid);
   const myRequests = requests.filter((r) => r.requesterId === currentUser.uid);
   const mySentBorrowRequests = borrowRequests.filter((b) => b.requesterId === currentUser.uid);
@@ -111,22 +153,35 @@ export const DashboardPage: React.FC = () => {
     setTimeout(() => setStatusMessage(null), 3000);
   };
 
-  const handleDeleteListing = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this listing?')) {
-      await deleteListing(id);
+  const handleConfirmDeleteListing = async () => {
+    if (!listingToDelete) return;
+    setIsDeletingListing(true);
+    setDeleteListingError(null);
+    try {
+      const result = await deleteListing(listingToDelete.id);
+      setListingToDelete(null);
+      setStatusMessage(result.message);
+      setTimeout(() => setStatusMessage(null), 3500);
+    } catch (err: any) {
+      setDeleteListingError(err.message || 'Failed to delete listing.');
+    } finally {
+      setIsDeletingListing(false);
     }
   };
 
-  const handleDeleteRequest = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this request? This action cannot be undone.')) {
-      try {
-        const res = await deleteRequest(id);
-        setStatusMessage(res.message);
-        setTimeout(() => setStatusMessage(null), 3500);
-      } catch (err: any) {
-        setStatusMessage(err.message || 'Failed to delete request.');
-        setTimeout(() => setStatusMessage(null), 3500);
-      }
+  const handleConfirmDeleteRequest = async () => {
+    if (!requestToDelete) return;
+    setIsDeletingRequest(true);
+    setDeleteRequestError(null);
+    try {
+      const result = await deleteRequest(requestToDelete.id);
+      setRequestToDelete(null);
+      setStatusMessage(result.message);
+      setTimeout(() => setStatusMessage(null), 3500);
+    } catch (err: any) {
+      setDeleteRequestError(err.message || 'Failed to delete request.');
+    } finally {
+      setIsDeletingRequest(false);
     }
   };
 
@@ -336,7 +391,7 @@ export const DashboardPage: React.FC = () => {
         ].map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id as any)}
+            onClick={() => handleTabChange(tab.id as any)}
             className={`px-4 py-2.5 rounded-2xl text-xs font-bold flex items-center space-x-2 whitespace-nowrap transition-all ${
               activeTab === tab.id
                 ? 'bg-[#12372A] text-white shadow-xs'
@@ -361,10 +416,15 @@ export const DashboardPage: React.FC = () => {
         {activeTab === 'listings' && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold text-neutral-900">Your Wardrobe Listings</h2>
+              <div>
+                <h2 className="text-lg font-bold text-neutral-900">Your Wardrobe Listings</h2>
+                <p className="text-xs text-neutral-500">
+                  Manage your campus items available for sale, borrow, exchange, or donation.
+                </p>
+              </div>
               <Link
                 to="/create-listing"
-                className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-[#12372A] text-white text-xs font-bold hover:bg-[#1E4D2B]"
+                className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-[#12372A] text-white text-xs font-bold hover:bg-[#1E4D2B] transition-all shadow-xs"
               >
                 <PlusCircle className="w-4 h-4 text-emerald-300" />
                 <span>Add Item</span>
@@ -374,13 +434,13 @@ export const DashboardPage: React.FC = () => {
             {myListings.length === 0 ? (
               <div className="text-center py-12 bg-white rounded-3xl border border-neutral-200 p-8 space-y-3">
                 <ShoppingBag className="w-10 h-10 mx-auto text-neutral-300" />
-                <h3 className="text-sm font-bold text-neutral-800">You haven't listed any clothes yet</h3>
+                <h3 className="text-sm font-bold text-neutral-800">You haven't listed any items yet</h3>
                 <p className="text-xs text-neutral-500 max-w-sm mx-auto">
-                  Earn student pocket money by lending blazers, kurtas, or dresses, or sell clothes you no longer wear.
+                  Earn student pocket money by lending blazers, kurtas, or dresses, or sell clothes and gear you no longer need.
                 </p>
                 <Link
                   to="/create-listing"
-                  className="inline-block px-5 py-2.5 rounded-xl bg-[#12372A] text-white text-xs font-bold"
+                  className="inline-block px-5 py-2.5 rounded-xl bg-[#12372A] text-white text-xs font-bold hover:bg-[#1E4D2B] transition-colors"
                 >
                   List an Item Now
                 </Link>
@@ -388,15 +448,130 @@ export const DashboardPage: React.FC = () => {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 {myListings.map((item) => (
-                  <div key={item.id} className="relative group">
-                    <ProductCard listing={item} />
-                    <button
-                      onClick={() => handleDeleteListing(item.id)}
-                      className="absolute top-3 left-3 p-2 rounded-full bg-rose-600 text-white shadow-md hover:bg-rose-700 transition-colors z-20"
-                      title="Delete your listing"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                  <div
+                    key={item.id}
+                    className="bg-white rounded-2xl border border-neutral-200/90 overflow-hidden shadow-xs hover:shadow-md transition-shadow flex flex-col"
+                  >
+                    {/* Item Image with Badges */}
+                    <div className="relative aspect-[4/3] bg-neutral-100 overflow-hidden">
+                      <img
+                        src={item.images[0] || 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=800&q=80'}
+                        alt={item.title}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+
+                      {/* Storage Source Badge */}
+                      <div className="absolute top-3 right-3 z-10">
+                        {item.isLocalPrototype ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-700/90 text-white backdrop-blur-md shadow-xs">
+                            <Laptop className="w-2.5 h-2.5 mr-1" />
+                            Local Prototype
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-800/80 text-white backdrop-blur-md shadow-xs">
+                            <Cloud className="w-2.5 h-2.5 mr-1 text-emerald-300" />
+                            Firebase Cloud
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Transaction Badges (Offer Types) */}
+                      <div className="absolute top-3 left-3 flex flex-wrap gap-1 max-w-[70%] z-10">
+                        {item.transactionTypes.map((type) => (
+                          <span
+                            key={type}
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold text-white shadow-xs ${
+                              type === 'Borrow'
+                                ? 'bg-[#12372A]'
+                                : type === 'Buy'
+                                ? 'bg-[#2D6A4F]'
+                                : type === 'Exchange'
+                                ? 'bg-amber-600'
+                                : 'bg-emerald-600'
+                            }`}
+                          >
+                            {type}
+                          </span>
+                        ))}
+                      </div>
+
+                      {/* Condition & Size Overlay */}
+                      <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between text-[10px] pointer-events-none">
+                        <span className="px-2 py-0.5 rounded bg-white/95 backdrop-blur-xs font-bold text-neutral-800 shadow-2xs">
+                          {item.size && item.size !== 'N/A' ? `Size: ${item.size}` : item.category}
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-neutral-900/75 backdrop-blur-xs text-white font-medium">
+                          {item.condition}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Card Content */}
+                    <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
+                      <div className="space-y-1.5">
+                        <div className="flex items-center text-xs text-[#2D6A4F] font-semibold truncate">
+                          <School className="w-3.5 h-3.5 mr-1 flex-shrink-0" />
+                          <span className="truncate">{item.university}</span>
+                          {item.campusSpot && (
+                            <span className="text-neutral-400 text-[11px] ml-1 truncate">({item.campusSpot})</span>
+                          )}
+                        </div>
+
+                        <Link to={`/item/${item.id}`} className="block">
+                          <h3 className="text-sm font-bold text-neutral-900 hover:text-[#2D6A4F] transition-colors line-clamp-1">
+                            {item.title}
+                          </h3>
+                        </Link>
+
+                        <div className="flex flex-wrap items-baseline gap-2 pt-0.5">
+                          {item.transactionTypes.includes('Buy') && item.price !== undefined && (
+                            <span className="text-sm font-extrabold text-[#12372A]">
+                              ₹{item.price}
+                            </span>
+                          )}
+                          {item.transactionTypes.includes('Borrow') && (
+                            <span className="text-xs font-bold text-[#2D6A4F]">
+                              ₹{item.borrowRate || 100}/day
+                            </span>
+                          )}
+                          {item.transactionTypes.includes('Donate') && (
+                            <span className="text-xs font-bold text-emerald-600">
+                              Free Donation
+                            </span>
+                          )}
+                          {item.transactionTypes.includes('Exchange') && (
+                            <span className="text-xs font-semibold text-amber-700">
+                              Available to Swap
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Management Action Buttons */}
+                      <div className="pt-2 border-t border-neutral-100 flex items-center justify-between gap-2">
+                        <Link
+                          to={`/item/${item.id}`}
+                          className="flex-1 inline-flex items-center justify-center space-x-1 px-3 py-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-xs font-semibold transition-colors"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>View</span>
+                        </Link>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setListingToDelete(item);
+                            setDeleteListingError(null);
+                          }}
+                          className="flex-1 inline-flex items-center justify-center space-x-1 px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold transition-colors cursor-pointer"
+                          aria-label={`Delete listing ${item.title}`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Delete</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -440,7 +615,10 @@ export const DashboardPage: React.FC = () => {
                     request={req}
                     onOffer={() => {}}
                     onViewResponses={(r) => setSelectedRequestForResponses(r)}
-                    onDelete={() => handleDeleteRequest(req.id)}
+                    onDelete={() => {
+                      setRequestToDelete(req);
+                      setDeleteRequestError(null);
+                    }}
                   />
                 ))}
               </div>
@@ -635,6 +813,36 @@ export const DashboardPage: React.FC = () => {
         request={selectedRequestForResponses}
         isOpen={Boolean(selectedRequestForResponses)}
         onClose={() => setSelectedRequestForResponses(null)}
+      />
+
+      {/* Delete Listing Confirmation Modal */}
+      <DeleteListingModal
+        listing={listingToDelete}
+        isOpen={Boolean(listingToDelete)}
+        isLoading={isDeletingListing}
+        error={deleteListingError}
+        onConfirm={handleConfirmDeleteListing}
+        onCancel={() => {
+          if (!isDeletingListing) {
+            setListingToDelete(null);
+            setDeleteListingError(null);
+          }
+        }}
+      />
+
+      {/* Delete Request Confirmation Modal */}
+      <DeleteConfirmModal
+        request={requestToDelete}
+        isOpen={Boolean(requestToDelete)}
+        isLoading={isDeletingRequest}
+        error={deleteRequestError}
+        onConfirm={handleConfirmDeleteRequest}
+        onCancel={() => {
+          if (!isDeletingRequest) {
+            setRequestToDelete(null);
+            setDeleteRequestError(null);
+          }
+        }}
       />
     </div>
   );

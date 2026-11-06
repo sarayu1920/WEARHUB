@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useRequests } from '../context/RequestContext';
 import { useUniversity } from '../context/UniversityContext';
 import { useAuth } from '../context/AuthContext';
@@ -25,12 +25,29 @@ import {
 } from 'lucide-react';
 
 export const RequestsPage: React.FC = () => {
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { requests, deleteRequest } = useRequests();
   const { activeBrowseFilter } = useUniversity();
   const { currentUser, isFirebaseReady, loginAsDemoUser } = useAuth();
 
+  const tabParam = searchParams.get('tab');
+
   // Tab mode: 'all' = public feed, 'my-requests' = authenticated user's requests only
-  const [activeTab, setActiveTab] = useState<'all' | 'my-requests'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'my-requests'>(
+    tabParam === 'my-requests' && currentUser ? 'my-requests' : 'all'
+  );
+
+  // If a guest requests "my-requests" via direct URL, redirect to login preserving destination
+  useEffect(() => {
+    if (tabParam === 'my-requests') {
+      if (!currentUser) {
+        navigate(`/auth?redirect=${encodeURIComponent('/requests?tab=my-requests')}`, { replace: true });
+      } else {
+        setActiveTab('my-requests');
+      }
+    }
+  }, [tabParam, currentUser, navigate]);
 
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -188,7 +205,12 @@ export const RequestsPage: React.FC = () => {
         <div className="flex items-center space-x-2 bg-neutral-100 p-1.5 rounded-2xl w-fit border border-neutral-200/80">
           <button
             type="button"
-            onClick={() => setActiveTab('all')}
+            onClick={() => {
+              setActiveTab('all');
+              const newParams = new URLSearchParams(searchParams);
+              newParams.delete('tab');
+              setSearchParams(newParams);
+            }}
             className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
               activeTab === 'all'
                 ? 'bg-white text-neutral-900 shadow-xs'
@@ -208,7 +230,16 @@ export const RequestsPage: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => setActiveTab('my-requests')}
+            onClick={() => {
+              if (!currentUser) {
+                navigate(`/auth?redirect=${encodeURIComponent('/requests?tab=my-requests')}`);
+                return;
+              }
+              setActiveTab('my-requests');
+              const newParams = new URLSearchParams(searchParams);
+              newParams.set('tab', 'my-requests');
+              setSearchParams(newParams);
+            }}
             className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
               activeTab === 'my-requests'
                 ? 'bg-white text-neutral-900 shadow-xs'
@@ -350,7 +381,13 @@ export const RequestsPage: React.FC = () => {
             <RequestCard
               key={req.id}
               request={req}
-              onOffer={(r) => setSelectedOfferRequest(r)}
+              onOffer={(r) => {
+                if (!currentUser) {
+                  navigate(`/auth?redirect=${encodeURIComponent('/requests')}`);
+                  return;
+                }
+                setSelectedOfferRequest(r);
+              }}
               onViewResponses={(r) => setSelectedViewResponseRequest(r)}
               onDelete={(r) => {
                 setDeleteError(null);

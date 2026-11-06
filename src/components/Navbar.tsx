@@ -99,7 +99,7 @@ export const Navbar: React.FC = () => {
           <div className="flex items-center justify-between h-18">
             {/* Logo & Tagline */}
             <div className="flex items-center space-x-3">
-              <Link to="/" className="flex items-center space-x-2.5 group">
+              <Link to={currentUser ? '/' : '/auth'} className="flex items-center space-x-2.5 group">
                 <div className="w-10 h-10 rounded-2xl bg-[#12372A] flex items-center justify-center text-white shadow-md group-hover:bg-[#1E4D2B] transition-colors">
                   <ShoppingBag className="w-5 h-5 text-emerald-300" />
                 </div>
@@ -144,16 +144,18 @@ export const Navbar: React.FC = () => {
 
             {/* Desktop Navigation Links */}
             <nav className="hidden lg:flex items-center space-x-1">
-              <Link
-                to="/"
-                className={`px-3 py-2 rounded-xl text-xs font-bold transition-colors ${
-                  isActive('/')
-                    ? 'text-[#12372A] bg-emerald-50'
-                    : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100/80'
-                }`}
-              >
-                Home
-              </Link>
+              {currentUser && (
+                <Link
+                  to="/"
+                  className={`px-3 py-2 rounded-xl text-xs font-bold transition-colors ${
+                    isActive('/')
+                      ? 'text-[#12372A] bg-emerald-50'
+                      : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100/80'
+                  }`}
+                >
+                  Home
+                </Link>
+              )}
               <Link
                 to="/browse"
                 className={`px-3 py-2 rounded-xl text-xs font-bold transition-colors ${
@@ -174,39 +176,43 @@ export const Navbar: React.FC = () => {
               >
                 Requests Feed
               </Link>
-              <Link
-                to="/post-request"
-                className={`px-3 py-2 rounded-xl text-xs font-bold transition-colors ${
-                  isActive('/post-request')
-                    ? 'text-[#12372A] bg-emerald-50'
-                    : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100/80'
-                }`}
-              >
-                Post a Request
-              </Link>
+              {currentUser && (
+                <>
+                  <Link
+                    to="/post-request"
+                    className={`px-3 py-2 rounded-xl text-xs font-bold transition-colors ${
+                      isActive('/post-request')
+                        ? 'text-[#12372A] bg-emerald-50'
+                        : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100/80'
+                    }`}
+                  >
+                    Post a Request
+                  </Link>
 
-              {/* Messages Link */}
-              <Link
-                to="/messages"
-                className={`relative px-3 py-2 rounded-xl text-xs font-bold transition-colors flex items-center space-x-1.5 ${
-                  isActive('/messages')
-                    ? 'text-[#12372A] bg-emerald-50'
-                    : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100/80'
-                }`}
-              >
-                <MessageSquare className="w-4 h-4" />
-                <span>Messages</span>
-                {unreadCount > 0 && (
-                  <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
-                )}
-              </Link>
+                  {/* Messages Link */}
+                  <Link
+                    to="/messages"
+                    className={`relative px-3 py-2 rounded-xl text-xs font-bold transition-colors flex items-center space-x-1.5 ${
+                      isActive('/messages')
+                        ? 'text-[#12372A] bg-emerald-50'
+                        : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100/80'
+                    }`}
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                    <span>Messages</span>
+                    {unreadCount > 0 && (
+                      <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
+                    )}
+                  </Link>
+                </>
+              )}
             </nav>
 
             {/* Right Action buttons */}
             <div className="flex items-center space-x-3">
               {/* Sell / Lend CTA button */}
               <Link
-                to="/create-listing"
+                to={currentUser ? "/create-listing" : "/auth?redirect=/create-listing"}
                 className="hidden sm:inline-flex items-center space-x-2 px-4 py-2 rounded-full bg-[#12372A] hover:bg-[#1E4D2B] text-white text-xs font-bold shadow-xs hover:shadow-md transition-all duration-200"
               >
                 <PlusCircle className="w-4 h-4 text-emerald-300" />
@@ -256,6 +262,22 @@ export const Navbar: React.FC = () => {
 
                       <div className="py-1 text-xs">
                         <Link
+                          to="/dashboard?tab=listings"
+                          onClick={() => setIsUserDropdownOpen(false)}
+                          className="flex items-center space-x-2 px-3 py-2 rounded-xl text-neutral-700 hover:bg-neutral-50 hover:text-neutral-900 font-medium"
+                        >
+                          <ShoppingBag className="w-4 h-4 text-emerald-800" />
+                          <span>My Listings</span>
+                        </Link>
+                        <Link
+                          to="/dashboard?tab=requests"
+                          onClick={() => setIsUserDropdownOpen(false)}
+                          className="flex items-center space-x-2 px-3 py-2 rounded-xl text-neutral-700 hover:bg-neutral-50 hover:text-neutral-900 font-medium"
+                        >
+                          <HelpCircle className="w-4 h-4 text-emerald-800" />
+                          <span>My Requests</span>
+                        </Link>
+                        <Link
                           to="/profile"
                           onClick={() => setIsUserDropdownOpen(false)}
                           className="flex items-center space-x-2 px-3 py-2 rounded-xl text-neutral-700 hover:bg-neutral-50 hover:text-neutral-900 font-medium"
@@ -285,11 +307,12 @@ export const Navbar: React.FC = () => {
 
                       <div className="pt-1 border-t border-neutral-100">
                         <button
-                          onClick={() => {
+                          onClick={async () => {
                             setIsUserDropdownOpen(false);
-                            logout();
+                            await logout();
+                            navigate('/auth', { replace: true });
                           }}
-                          className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-rose-600 hover:bg-rose-50 text-xs font-semibold"
+                          className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-rose-600 hover:bg-rose-50 text-xs font-semibold cursor-pointer"
                         >
                           <LogOut className="w-4 h-4" />
                           <span>Log Out</span>
@@ -357,13 +380,15 @@ export const Navbar: React.FC = () => {
             </form>
 
             <nav className="flex flex-col space-y-1 text-sm font-semibold">
-              <Link
-                to="/"
-                onClick={() => setIsMobileMenuOpen(false)}
-                className="px-3 py-2 rounded-lg text-neutral-700 hover:bg-neutral-50"
-              >
-                Home
-              </Link>
+              {currentUser && (
+                <Link
+                  to="/"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="px-3 py-2 rounded-lg text-neutral-700 hover:bg-neutral-50"
+                >
+                  Home
+                </Link>
+              )}
               <Link
                 to="/browse"
                 onClick={() => setIsMobileMenuOpen(false)}
@@ -378,43 +403,91 @@ export const Navbar: React.FC = () => {
               >
                 Requests Feed
               </Link>
-              <Link
-                to="/post-request"
-                onClick={() => setIsMobileMenuOpen(false)}
-                className="px-3 py-2 rounded-lg text-neutral-700 hover:bg-neutral-50"
-              >
-                Post a Request
-              </Link>
-              <Link
-                to="/create-listing"
-                onClick={() => setIsMobileMenuOpen(false)}
-                className="px-3 py-2 rounded-lg text-neutral-700 hover:bg-neutral-50"
-              >
-                Sell or Lend an Item
-              </Link>
-              <Link
-                to="/messages"
-                onClick={() => setIsMobileMenuOpen(false)}
-                className="px-3 py-2 rounded-lg text-neutral-700 hover:bg-neutral-50 flex items-center justify-between"
-              >
-                <span>Messages</span>
-                {unreadCount > 0 && (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-600 text-white font-bold">
-                    Active
-                  </span>
-                )}
-              </Link>
-              <Link
-                to="/profile"
-                onClick={() => setIsMobileMenuOpen(false)}
-                className="px-3 py-2 rounded-lg text-neutral-700 hover:bg-neutral-50"
-              >
-                My Profile & Dashboard
-              </Link>
+              {currentUser ? (
+                <>
+                  <Link
+                    to="/post-request"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="px-3 py-2 rounded-lg text-neutral-700 hover:bg-neutral-50"
+                  >
+                    Post a Request
+                  </Link>
+                  <Link
+                    to="/create-listing"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="px-3 py-2 rounded-lg text-neutral-700 hover:bg-neutral-50"
+                  >
+                    Sell or Lend an Item
+                  </Link>
+                  <Link
+                    to="/messages"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="px-3 py-2 rounded-lg text-neutral-700 hover:bg-neutral-50 flex items-center justify-between"
+                  >
+                    <span>Messages</span>
+                    {unreadCount > 0 && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-600 text-white font-bold">
+                        Active
+                      </span>
+                    )}
+                  </Link>
+                  <Link
+                    to="/dashboard?tab=listings"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="px-3 py-2 rounded-lg text-neutral-700 hover:bg-neutral-50 flex items-center space-x-2"
+                  >
+                    <ShoppingBag className="w-4 h-4 text-emerald-800" />
+                    <span>My Listings</span>
+                  </Link>
+                  <Link
+                    to="/dashboard?tab=requests"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="px-3 py-2 rounded-lg text-neutral-700 hover:bg-neutral-50 flex items-center space-x-2"
+                  >
+                    <HelpCircle className="w-4 h-4 text-emerald-800" />
+                    <span>My Requests</span>
+                  </Link>
+                  <Link
+                    to="/profile"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="px-3 py-2 rounded-lg text-neutral-700 hover:bg-neutral-50"
+                  >
+                    My Profile & Dashboard
+                  </Link>
+                  <button
+                    onClick={async () => {
+                      setIsMobileMenuOpen(false);
+                      await logout();
+                      navigate('/auth', { replace: true });
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-lg text-rose-600 hover:bg-rose-50 flex items-center space-x-2 cursor-pointer"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span>Log Out</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Link
+                    to="/auth"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="px-3 py-2 rounded-lg text-neutral-800 hover:bg-neutral-50 font-bold"
+                  >
+                    Log In
+                  </Link>
+                  <Link
+                    to="/auth?mode=signup"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="px-3 py-2 rounded-lg text-emerald-800 hover:bg-emerald-50 font-bold"
+                  >
+                    Sign Up
+                  </Link>
+                </>
+              )}
               <Link
                 to="/setup-guide"
                 onClick={() => setIsMobileMenuOpen(false)}
-                className="px-3 py-2 rounded-lg text-neutral-700 hover:bg-neutral-50 text-emerald-800"
+                className="px-3 py-2 rounded-lg text-neutral-500 hover:bg-neutral-50 text-xs mt-2 pt-2 border-t border-neutral-100"
               >
                 Firebase Setup & Deployment Guide
               </Link>

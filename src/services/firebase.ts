@@ -9,6 +9,7 @@ import {
   GoogleAuthProvider,
   signInWithPopup,
   updateProfile,
+  fetchSignInMethodsForEmail,
 } from 'firebase/auth';
 import {
   getFirestore,
@@ -25,7 +26,13 @@ import {
   deleteDoc,
   serverTimestamp,
 } from 'firebase/firestore';
-import { getStorage, FirebaseStorage } from 'firebase/storage';
+import {
+  getStorage,
+  FirebaseStorage,
+  ref,
+  uploadBytes,
+  getDownloadURL,
+} from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
@@ -37,11 +44,29 @@ const firebaseConfig = {
 };
 
 export const isFirebaseConfigured = (): boolean => {
+  const { apiKey, projectId, appId } = firebaseConfig;
   return Boolean(
-    firebaseConfig.apiKey &&
-    firebaseConfig.apiKey !== 'your-firebase-api-key' &&
-    firebaseConfig.projectId &&
-    firebaseConfig.projectId !== 'your-project-id'
+    apiKey &&
+    apiKey !== 'your-firebase-api-key' &&
+    apiKey !== 'your_api_key_here' &&
+    !apiKey.includes('your_api_key') &&
+    projectId &&
+    projectId !== 'your-project-id' &&
+    projectId !== 'your_project_id' &&
+    !projectId.includes('your_project_id') &&
+    appId &&
+    appId !== 'your_app_id' &&
+    !appId.includes('your_app_id')
+  );
+};
+
+export const isFirebaseStorageConfigured = (): boolean => {
+  return Boolean(
+    isFirebaseConfigured() &&
+    storage &&
+    firebaseConfig.storageBucket &&
+    firebaseConfig.storageBucket !== 'your_project_id.appspot.com' &&
+    !firebaseConfig.storageBucket.includes('your_project_id')
   );
 };
 
@@ -70,6 +95,9 @@ export {
   auth,
   db,
   storage,
+  ref,
+  uploadBytes,
+  getDownloadURL,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut,
@@ -77,6 +105,7 @@ export {
   GoogleAuthProvider,
   signInWithPopup,
   updateProfile,
+  fetchSignInMethodsForEmail,
   doc,
   setDoc,
   getDoc,

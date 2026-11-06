@@ -1,0 +1,20 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Listing item images: Public read, owner-authenticated upload with validation
+    match /listings/{userId}/{fileName} {
+      // Anyone can view listing photos
+      allow read: if true;
+
+      // Only the authenticated student can upload to their user folder
+      // Restrict to JPEG, PNG, and WebP images up to 5MB
+      allow write: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.contentType.matches('image/(jpeg|png|webp)')
+        && request.resource.size < 5 * 1024 * 1024;
+
+      // Only the owner can delete their uploaded image
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}

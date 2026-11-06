@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useListings } from '../context/ListingContext';
 import { useUniversity } from '../context/UniversityContext';
 import { ItemCategory, ClothingSize, ItemCondition, TransactionType } from '../types';
+import { compressImageFile } from '../utils/imageStorage';
 import {
   PlusCircle,
   AlertCircle,
@@ -14,6 +15,12 @@ import {
   Gift,
   MapPin,
   ShieldAlert,
+  Upload,
+  Camera,
+  CheckCircle2,
+  Trash2,
+  RotateCcw,
+  Laptop,
 } from 'lucide-react';
 
 const CATEGORIES: ItemCategory[] = [
@@ -35,7 +42,7 @@ const CONDITIONS: ItemCondition[] = [
   'Well Loved',
 ];
 
-// Sample image presets for fast testing
+// Sample image presets for optional quick-selection
 const SAMPLE_IMAGE_PRESETS = [
   {
     name: 'Formal Blazer',
@@ -86,7 +93,16 @@ export const CreateListingPage: React.FC = () => {
   const [borrowRate, setBorrowRate] = useState<number>(100);
   const [borrowDurationLimit, setBorrowDurationLimit] = useState<string>('1 - 3 days');
   const [securityDeposit, setSecurityDeposit] = useState<number>(300);
-  const [imageUrl, setImageUrl] = useState<string>(SAMPLE_IMAGE_PRESETS[0].url);
+
+  // Photo states - neutral by default, no pre-filled blazer
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string>('');
+  const [imageUrl, setImageUrl] = useState<string>('');
+  const [photoTab, setPhotoTab] = useState<'upload' | 'url'>('upload');
+  const [uploadProgress, setUploadProgress] = useState<string>('');
+  const [compressing, setCompressing] = useState<boolean>(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const [university, setUniversity] = useState<string>(
     currentUser?.homeUniversity || 'VIT-AP University'
   );
@@ -103,6 +119,71 @@ export const CreateListingPage: React.FC = () => {
     } else {
       setTransactionTypes([...transactionTypes, type]);
     }
+  };
+
+  // Handle device photo selection with safe client-side compression
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate MIME type: image/jpeg, image/png, image/webp
+    const validTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!validTypes.includes(file.type)) {
+      setError('Please select a valid image file format: JPEG, PNG, or WebP.');
+      return;
+    }
+
+    // Validate file size: maximum 5 MB
+    const maxSizeInBytes = 5 * 1024 * 1024;
+    if (file.size > maxSizeInBytes) {
+      setError(
+        `Selected image is too large (${(file.size / (1024 * 1024)).toFixed(1)} MB). Maximum allowed size is 5 MB.`
+      );
+      return;
+    }
+
+    setError(null);
+    setSelectedFile(file);
+    setCompressing(true);
+
+    try {
+      // Process and compress image on client-side to a compact Base64 Data URL (~100-250KB)
+      // This is NOT a temporary blob: URL and safely survives page refreshes in browser storage!
+      const dataUrl = await compressImageFile(file);
+      setPreviewUrl(dataUrl);
+      setImageUrl('');
+    } catch (err) {
+      console.error('Error optimizing photo:', err);
+      // Fallback: standard file read as Data URL
+      const reader = new FileReader();
+      reader.onload = () => {
+        setPreviewUrl(reader.result as string);
+        setImageUrl('');
+      };
+      reader.readAsDataURL(file);
+    } finally {
+      setCompressing(false);
+    }
+  };
+
+  // Remove selected photo
+  const handleRemovePhoto = () => {
+    setSelectedFile(null);
+    setPreviewUrl('');
+    setImageUrl('');
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  // URL / preset change
+  const handleUrlChange = (url: string) => {
+    setSelectedFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    setImageUrl(url);
+    setPreviewUrl(url);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -127,10 +208,24 @@ export const CreateListingPage: React.FC = () => {
       return;
     }
 
+    // Photo is required
+    const activePhoto = selectedFile ? previewUrl : imageUrl.trim();
+    if (!activePhoto) {
+      setError('Please provide a photo for your item (upload a photo or choose an image).');
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
     try {
+      // Local prototype mode: save optimized data URL directly to browser storage
+      // NEVER attempt Firebase Storage uploads in local prototype mode.
+      const isLocalPhoto = Boolean(selectedFile && previewUrl);
+      const finalImageUrl = isLocalPhoto ? previewUrl : imageUrl.trim();
+
+      setUploadProgress('Saving local prototype listing to browser storage...');
+
       const newId = await createListing({
         title: title.trim(),
         description: description.trim(),
@@ -143,16 +238,19 @@ export const CreateListingPage: React.FC = () => {
         borrowRate: transactionTypes.includes('Borrow') ? Number(borrowRate) : undefined,
         borrowDurationLimit: transactionTypes.includes('Borrow') ? borrowDurationLimit : undefined,
         securityDeposit: transactionTypes.includes('Borrow') ? Number(securityDeposit) : undefined,
-        images: [imageUrl.trim() || SAMPLE_IMAGE_PRESETS[0].url],
+        images: [finalImageUrl],
         university,
         campusSpot: campusSpot.trim() || undefined,
         status: 'available',
+        isLocalPrototype: isLocalPhoto,
       });
 
       navigate(`/item/${newId}`);
     } catch (err: any) {
+      console.error('Error publishing listing:', err);
       setError(err?.message || 'Failed to publish listing');
       setLoading(false);
+      setUploadProgress('');
     }
   };
 
@@ -418,41 +516,159 @@ export const CreateListingPage: React.FC = () => {
           </div>
 
           {/* Image selection */}
-          <div className="space-y-2">
-            <label className="block text-xs font-bold text-neutral-700">
-              Item Photos (Image URL or Choose Preset) *
-            </label>
-            <input
-              type="url"
-              required
-              value={imageUrl}
-              onChange={(e) => setImageUrl(e.target.value)}
-              placeholder="Paste public photo URL (Unsplash, Imgur, Cloudinary...)"
-              className="w-full px-3.5 py-2 text-xs bg-neutral-50 border border-neutral-300 rounded-xl focus:bg-white focus:outline-none"
-            />
-
-            {/* Presets */}
-            <div className="pt-2">
-              <span className="text-[11px] font-semibold text-neutral-500 block mb-1.5">
-                Or quick-select sample item image preset:
-              </span>
-              <div className="flex flex-wrap gap-2">
-                {SAMPLE_IMAGE_PRESETS.map((preset) => (
-                  <button
-                    type="button"
-                    key={preset.name}
-                    onClick={() => setImageUrl(preset.url)}
-                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-all ${
-                      imageUrl === preset.url
-                        ? 'bg-[#12372A] text-white border-[#12372A]'
-                        : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-700 border-neutral-200'
-                    }`}
-                  >
-                    {preset.name}
-                  </button>
-                ))}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold text-neutral-700">
+                Item Photo *
+              </label>
+              <div className="flex rounded-lg bg-neutral-100 p-0.5 text-[11px] font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setPhotoTab('upload')}
+                  className={`px-2.5 py-1 rounded-md transition-all ${
+                    photoTab === 'upload'
+                      ? 'bg-white text-neutral-900 shadow-xs'
+                      : 'text-neutral-500 hover:text-neutral-800'
+                  }`}
+                >
+                  Upload Photo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPhotoTab('url')}
+                  className={`px-2.5 py-1 rounded-md transition-all ${
+                    photoTab === 'url'
+                      ? 'bg-white text-neutral-900 shadow-xs'
+                      : 'text-neutral-500 hover:text-neutral-800'
+                  }`}
+                >
+                  Image URL / Preset
+                </button>
               </div>
             </div>
+
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+
+            {photoTab === 'upload' && (
+              <div className="space-y-2">
+                {!selectedFile ? (
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    className="border-2 border-dashed border-neutral-300 hover:border-[#2D6A4F] bg-neutral-50/70 hover:bg-neutral-50 rounded-2xl p-6 text-center cursor-pointer transition-all group"
+                  >
+                    <div className="w-12 h-12 mx-auto rounded-full bg-emerald-50 text-[#12372A] group-hover:bg-[#12372A] group-hover:text-white flex items-center justify-center transition-all mb-3">
+                      <Upload className="w-5 h-5" />
+                    </div>
+                    <p className="text-xs font-bold text-neutral-800">
+                      Click to choose a photo from your device
+                    </p>
+                    <p className="text-[11px] text-neutral-500 mt-1">
+                      Accepts JPEG, PNG, or WebP &bull; Max 5 MB
+                    </p>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        fileInputRef.current?.click();
+                      }}
+                      className="mt-3 px-4 py-1.5 rounded-xl bg-[#12372A] text-white text-xs font-bold hover:bg-[#1E4D2B] transition-colors inline-flex items-center space-x-1.5"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>Choose Photo</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="p-3.5 rounded-2xl border border-emerald-200 bg-emerald-50/40 flex items-center justify-between">
+                    <div className="flex items-center space-x-3 min-w-0">
+                      <img
+                        src={previewUrl}
+                        alt="Selected item"
+                        className="w-14 h-14 rounded-xl object-cover border border-emerald-200 shadow-xs flex-shrink-0"
+                      />
+                      <div className="min-w-0">
+                        <div className="flex items-center space-x-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                          <span className="text-xs font-bold text-neutral-900 truncate">
+                            {selectedFile.name}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-neutral-500 mt-0.5">
+                          {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB &bull; {selectedFile.type.replace('image/', '').toUpperCase()}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-2 flex-shrink-0 ml-3">
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="px-3 py-1.5 rounded-lg border border-neutral-300 hover:border-neutral-400 bg-white text-neutral-700 text-xs font-semibold flex items-center space-x-1 shadow-2xs"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>Replace</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleRemovePhoto}
+                        className="p-1.5 rounded-lg text-neutral-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                        title="Remove photo"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Status indicator */}
+                <div className="p-3 rounded-2xl bg-violet-50/80 border border-violet-200 text-violet-900 text-xs flex items-start space-x-2.5 mt-2">
+                  <Laptop className="w-4 h-4 text-violet-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold">Local Prototype Mode Active:</span> Device photos are optimized and saved in your browser's persistent storage. Your listings survive page refreshes without needing Firebase Storage or Blaze billing upgrades.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {photoTab === 'url' && (
+              <div className="space-y-3">
+                <input
+                  type="url"
+                  value={imageUrl}
+                  onChange={(e) => handleUrlChange(e.target.value)}
+                  placeholder="Paste public photo URL (Unsplash, Imgur, Cloudinary...)"
+                  className="w-full px-3.5 py-2 text-xs bg-neutral-50 border border-neutral-300 rounded-xl focus:bg-white focus:outline-none"
+                />
+
+                {/* Presets */}
+                <div>
+                  <span className="text-[11px] font-semibold text-neutral-500 block mb-1.5">
+                    Or select a sample item image preset:
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    {SAMPLE_IMAGE_PRESETS.map((preset) => (
+                      <button
+                        type="button"
+                        key={preset.name}
+                        onClick={() => handleUrlChange(preset.url)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-all ${
+                          imageUrl === preset.url
+                            ? 'bg-[#12372A] text-white border-[#12372A]'
+                            : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-700 border-neutral-200'
+                        }`}
+                      >
+                        {preset.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Description */}
@@ -477,7 +693,7 @@ export const CreateListingPage: React.FC = () => {
             className="w-full py-3.5 bg-[#12372A] hover:bg-[#1E4D2B] text-white text-sm font-bold rounded-xl shadow-md transition-all flex items-center justify-center space-x-2 disabled:opacity-50"
           >
             {loading ? (
-              <span>Publishing to Campus...</span>
+              <span>{uploadProgress || 'Publishing to Campus...'}</span>
             ) : (
               <>
                 <PlusCircle className="w-5 h-5 text-emerald-300" />
@@ -494,31 +710,69 @@ export const CreateListingPage: React.FC = () => {
           </div>
 
           <div className="bg-white rounded-3xl border border-neutral-200 overflow-hidden shadow-md">
-            <div className="aspect-[4/5] bg-neutral-100 relative overflow-hidden">
-              <img
-                src={imageUrl || SAMPLE_IMAGE_PRESETS[0].url}
-                alt="Preview"
-                className="w-full h-full object-cover"
-              />
-              <div className="absolute top-3 left-3 flex gap-1">
-                {transactionTypes.map((t) => (
-                  <span
-                    key={t}
-                    className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#12372A] text-white"
-                  >
-                    {t}
+            {selectedFile || imageUrl.trim() ? (
+              <div className="aspect-[4/5] bg-neutral-100 relative overflow-hidden">
+                <img
+                  src={selectedFile ? previewUrl : imageUrl.trim()}
+                  alt="Preview"
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute top-3 left-3 flex gap-1">
+                  {transactionTypes.map((t) => (
+                    <span
+                      key={t}
+                      className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#12372A] text-white shadow-xs"
+                    >
+                      {t}
+                    </span>
+                  ))}
+                </div>
+                {selectedFile && (
+                  <div className="absolute top-3 right-3">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-700/90 text-white backdrop-blur-md shadow-xs">
+                      <Laptop className="w-2.5 h-2.5 mr-1" />
+                      Local Prototype
+                    </span>
+                  </div>
+                )}
+                <div className="absolute bottom-3 left-3 right-3 flex justify-between">
+                  <span className="px-2 py-1 rounded-md text-[10px] font-bold bg-white/90 text-neutral-800 shadow-xs">
+                    Size: {size}
                   </span>
-                ))}
+                  <span className="px-2 py-1 rounded-md text-[10px] font-medium bg-neutral-900/80 text-white shadow-xs">
+                    {condition}
+                  </span>
+                </div>
               </div>
-              <div className="absolute bottom-3 left-3 right-3 flex justify-between">
-                <span className="px-2 py-1 rounded-md text-[10px] font-bold bg-white/90 text-neutral-800">
-                  Size: {size}
-                </span>
-                <span className="px-2 py-1 rounded-md text-[10px] font-medium bg-neutral-900/80 text-white">
-                  {condition}
-                </span>
+            ) : (
+              <div className="aspect-[4/5] bg-neutral-100 relative overflow-hidden flex flex-col items-center justify-center text-neutral-400 p-6 text-center border-b border-neutral-200">
+                <div className="w-14 h-14 rounded-2xl bg-neutral-200/80 flex items-center justify-center text-neutral-400 mb-3">
+                  <Camera className="w-7 h-7" />
+                </div>
+                <p className="text-xs font-bold text-neutral-700">No Photo Selected</p>
+                <p className="text-[11px] text-neutral-400 mt-1 max-w-[180px]">
+                  Upload a photo or select an image to see your live listing preview
+                </p>
+                <div className="absolute top-3 left-3 flex gap-1">
+                  {transactionTypes.map((t) => (
+                    <span
+                      key={t}
+                      className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#12372A] text-white shadow-xs"
+                    >
+                      {t}
+                    </span>
+                  ))}
+                </div>
+                <div className="absolute bottom-3 left-3 right-3 flex justify-between">
+                  <span className="px-2 py-1 rounded-md text-[10px] font-bold bg-white/90 text-neutral-800 shadow-xs">
+                    Size: {size}
+                  </span>
+                  <span className="px-2 py-1 rounded-md text-[10px] font-medium bg-neutral-900/80 text-white shadow-xs">
+                    {condition}
+                  </span>
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="p-4 space-y-2">
               <div className="text-[11px] font-semibold text-[#2D6A4F] flex items-center">

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useListings } from '../context/ListingContext';
 import { useUniversity } from '../context/UniversityContext';
 import { useAuth } from '../context/AuthContext';
@@ -40,6 +40,7 @@ const CONDITIONS: ItemCondition[] = [
 const TRANSACTION_TYPES: TransactionType[] = ['Buy', 'Borrow', 'Exchange', 'Donate'];
 
 export const BrowsePage: React.FC = () => {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { filterListings } = useListings();
   const { universities, activeBrowseFilter, setActiveBrowseFilter } = useUniversity();
@@ -407,7 +408,13 @@ export const BrowsePage: React.FC = () => {
                 <ProductCard
                   key={item.id}
                   listing={item}
-                  onQuickBorrow={(l) => setSelectedBorrowListing(l)}
+                  onQuickBorrow={(l) => {
+                    if (!currentUser) {
+                      navigate(`/auth?redirect=${encodeURIComponent('/browse')}`);
+                      return;
+                    }
+                    setSelectedBorrowListing(l);
+                  }}
                 />
               ))}
             </div>

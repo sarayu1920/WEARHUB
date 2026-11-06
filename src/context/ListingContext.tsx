@@ -1,8 +1,9 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Listing, BorrowRequest, FilterOptions } from '../types';
+import { Listing, BorrowRequest, FilterOptions, DeleteListingResult } from '../types';
 import { SAMPLE_LISTINGS } from '../data/sampleListings';
 import { useAuth } from './AuthContext';
 import {
+  auth,
   db,
   isFirebaseConfigured,
   collection,
@@ -12,11 +13,18 @@ import {
   doc,
 } from '../services/firebase';
 
+import {
+  savePhotoToIndexedDB,
+  getPhotoFromIndexedDB,
+  deletePhotoFromIndexedDB,
+  getCategoryFallbackImage,
+} from '../utils/imageStorage';
+
 interface ListingContextType {
   listings: Listing[];
   loading: boolean;
   createListing: (newListing: Omit<Listing, 'id' | 'createdAt' | 'ownerId' | 'ownerName' | 'ownerEmail' | 'ownerUniversity'>) => Promise<string>;
-  deleteListing: (id: string) => Promise<boolean>;
+  deleteListing: (id: string) => Promise<DeleteListingResult>;
   getListingById: (id: string) => Listing | undefined;
   createBorrowRequest: (
     listing: Listing,
@@ -37,6 +45,17 @@ export const ListingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [userCreatedListings, setUserCreatedListings] = useState<Listing[]>(() => {
     const saved = localStorage.getItem('wearhub_custom_listings');
     return saved ? JSON.parse(saved) : [];
+  });
+  const [deletedListingIds, setDeletedListingIds] = useState<string[]>(() => {
+    const saved = localStorage.getItem('wearhub_deleted_listing_ids');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {
+        return [];
+      }
+    }
+    return [];
   });
   const [borrowRequests, setBorrowRequests] = useState<BorrowRequest[]>(() => {
     const saved = localStorage.getItem('wearhub_borrow_requests');
@@ -78,6 +97,45 @@ export const ListingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     localStorage.setItem('wearhub_custom_listings', JSON.stringify(userCreatedListings));
   }, [userCreatedListings]);
 
+  // Sync deleted listing IDs to storage
+  useEffect(() => {
+    localStorage.setItem('wearhub_deleted_listing_ids', JSON.stringify(deletedListingIds));
+  }, [deletedListingIds]);
+
+  // Rehydrate photos from IndexedDB if needed
+  useEffect(() => {
+    let isMounted = true;
+    const rehydratePhotos = async () => {
+      try {
+        const updated = await Promise.all(
+          userCreatedListings.map(async (item) => {
+            if (item.isLocalPrototype) {
+              const cached = await getPhotoFromIndexedDB(item.id);
+              if (cached && cached !== item.images[0]) {
+                return { ...item, images: [cached] };
+              }
+            }
+            return item;
+          })
+        );
+        if (isMounted) {
+          const hasChanges = updated.some(
+            (item, idx) => item.images[0] !== userCreatedListings[idx]?.images[0]
+          );
+          if (hasChanges) {
+            setUserCreatedListings(updated);
+          }
+        }
+      } catch (err) {
+        console.warn('Error rehydrating local photos from IndexedDB:', err);
+      }
+    };
+    rehydratePhotos();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   // Sync borrow requests
   useEffect(() => {
     localStorage.setItem('wearhub_borrow_requests', JSON.stringify(borrowRequests));
@@ -106,12 +164,15 @@ export const ListingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, []);
 
-  // Combined listings: Firestore (if any) + Custom local/test listings + Sample listings
+  // Combined listings:
+  // User created local prototype listings take precedence on this device so the user's
+  // uploaded photo is displayed. Firestore listings that aren't already in userCreatedListings are appended.
+  // Deleted listings are excluded.
   const listings: Listing[] = [
-    ...firestoreListings,
     ...userCreatedListings,
+    ...firestoreListings.filter((fl) => !userCreatedListings.some((ul) => ul.id === fl.id)),
     ...SAMPLE_LISTINGS,
-  ];
+  ].filter((item) => !deletedListingIds.includes(item.id));
 
   const getListingById = (id: string): Listing | undefined => {
     return listings.find((item) => item.id === id);
@@ -123,6 +184,13 @@ export const ListingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (!currentUser) throw new Error('You must be signed in to create a listing');
 
     const generatedId = 'listing-' + Date.now();
+    const isLocalPhoto =
+      !newListingData.images[0] ||
+      newListingData.images[0].startsWith('data:') ||
+      newListingData.images[0].startsWith('blob:');
+
+    const isLocalPrototype = newListingData.isLocalPrototype ?? isLocalPhoto;
+
     const completeListing: Listing = {
       ...newListingData,
       id: generatedId,
@@ -134,18 +202,49 @@ export const ListingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       status: 'available',
       createdAt: new Date().toISOString(),
       isSample: false,
+      isLocalPrototype,
       views: 1,
     };
 
     if (isFirebaseConfigured() && db) {
       try {
-        const docRef = await addDoc(collection(db, 'listings'), completeListing);
+        // Safe Firestore copy: NEVER write temporary blob URLs to Firestore
+        let firestoreImages = [...completeListing.images];
+        if (isLocalPhoto) {
+          // Use a clean hosted category fallback image in Firestore so other users don't see broken images
+          firestoreImages = [getCategoryFallbackImage(completeListing.category)];
+        }
+
+        const firestorePayload: Listing = {
+          ...completeListing,
+          images: firestoreImages,
+          isLocalPrototype,
+        };
+
+        const docRef = await addDoc(collection(db, 'listings'), firestorePayload);
         completeListing.id = docRef.id;
-        setFirestoreListings((prev) => [completeListing, ...prev]);
+
+        // Persist local photo to IndexedDB with confirmed doc ID
+        if (isLocalPhoto && completeListing.images[0]) {
+          await savePhotoToIndexedDB(docRef.id, completeListing.images[0]);
+        }
+
+        const firestoreRecord: Listing = {
+          ...firestorePayload,
+          id: docRef.id,
+        };
+
+        setFirestoreListings((prev) => [firestoreRecord, ...prev]);
+        setUserCreatedListings((prev) => [completeListing, ...prev]);
         return docRef.id;
       } catch (err) {
         console.error('Failed to save listing to Firestore:', err);
       }
+    }
+
+    // Persist local photo to IndexedDB
+    if (isLocalPhoto && completeListing.images[0]) {
+      await savePhotoToIndexedDB(generatedId, completeListing.images[0]);
     }
 
     // Always update local reactive state
@@ -153,20 +252,107 @@ export const ListingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return generatedId;
   };
 
-  const deleteListing = async (id: string): Promise<boolean> => {
-    if (!currentUser) return false;
+  const deleteListing = async (id: string): Promise<DeleteListingResult> => {
+    if (!currentUser) {
+      throw new Error('You must be signed in to delete a listing.');
+    }
 
-    if (isFirebaseConfigured() && db) {
+    const targetListing = listings.find((item) => item.id === id);
+    if (!targetListing) {
+      throw new Error('Listing not found or has already been removed.');
+    }
+
+    // Strict ownership verification: authenticated UID must match ownerId
+    if (targetListing.ownerId !== currentUser.uid) {
+      throw new Error('Unauthorized: You can only delete listings created by your own account.');
+    }
+
+    let isPermanent = false;
+
+    // Distinguish between Cloud Firestore listings and Local-Only Prototype listings
+    const isSampleListing =
+      Boolean(targetListing.isSample) ||
+      targetListing.id.startsWith('sample-') ||
+      targetListing.id.startsWith('listing-sample-');
+    const isLocalGeneratedId = targetListing.id.startsWith('listing-');
+    const isInFirestoreCollection = firestoreListings.some((fl) => fl.id === id);
+
+    // It is a Cloud Firestore listing ONLY if it was loaded from Firestore or does NOT have a client-generated local-only ID
+    const isCloudListing =
+      isFirebaseConfigured() &&
+      Boolean(db) &&
+      !isSampleListing &&
+      (isInFirestoreCollection || !isLocalGeneratedId);
+
+    // If it is a Cloud Firestore listing, verify auth and delete from Firestore
+    if (isCloudListing && db) {
+      const currentAuthUser = auth?.currentUser;
+
+      // Ensure user has an active Firebase Auth session matching the listing owner
+      if (!currentAuthUser) {
+        throw new Error(
+          'Authentication required: You must be signed in with your Firebase account to delete cloud listings from the database.'
+        );
+      }
+
+      if (currentAuthUser.uid !== targetListing.ownerId) {
+        throw new Error(
+          'Permission denied: Your authenticated Firebase account does not match the owner ID of this listing.'
+        );
+      }
+
       try {
         await deleteDoc(doc(db, 'listings', id));
         setFirestoreListings((prev) => prev.filter((item) => item.id !== id));
-      } catch (err) {
-        console.error('Error deleting Firestore listing:', err);
+        isPermanent = true;
+      } catch (err: any) {
+        console.error('Error deleting listing from Firestore:', err);
+        const errCode = err?.code || '';
+        const errMsg = err?.message || '';
+        const isPermissionDenied =
+          errCode === 'permission-denied' ||
+          errMsg.toLowerCase().includes('permission') ||
+          errMsg.toLowerCase().includes('missing or insufficient permissions');
+
+        if (isPermissionDenied) {
+          throw new Error(
+            'Permission denied by Cloud Firestore: Your published database rules in Firebase Console do not permit deleting this listing. Please ensure your published security rules in Firebase Console allow the listing owner to delete (e.g. match /listings/{listingId} { allow delete: if request.auth != null && resource.data.ownerId == request.auth.uid; }).'
+          );
+        }
+
+        if (errCode === 'not-found' || errMsg.toLowerCase().includes('not found')) {
+          console.warn('Listing was not found in Firestore; continuing local cleanup.');
+        } else {
+          throw new Error(err.message || 'Failed to delete listing from Firestore.');
+        }
       }
     }
 
+    // Clean up local IndexedDB photo ONLY if image is not shared by another listing
+    const targetPhoto = targetListing.images && targetListing.images[0];
+    const isImageShared = Boolean(
+      targetPhoto &&
+      userCreatedListings.some(
+        (other) => other.id !== id && other.images && other.images.includes(targetPhoto)
+      )
+    );
+
+    if (!isImageShared) {
+      await deletePhotoFromIndexedDB(id);
+    }
+
+    // Remove from local userCreatedListings and mark ID as deleted
     setUserCreatedListings((prev) => prev.filter((item) => item.id !== id));
-    return true;
+    setFirestoreListings((prev) => prev.filter((item) => item.id !== id));
+    setDeletedListingIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+
+    return {
+      success: true,
+      isPermanent,
+      message: isPermanent
+        ? `"${targetListing.title}" was permanently deleted from the database.`
+        : `"${targetListing.title}" (Local Prototype) was removed successfully.`,
+    };
   };
 
   const createBorrowRequest = async (

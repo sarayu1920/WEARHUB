@@ -3,6 +3,7 @@ import { ItemRequest, RequestResponse } from '../types';
 import { SAMPLE_REQUESTS } from '../data/sampleRequests';
 import { useAuth } from './AuthContext';
 import {
+  auth,
   db,
   isFirebaseConfigured,
   collection,
@@ -181,14 +182,51 @@ export const RequestProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     let isPermanent = false;
 
-    if (isFirebaseConfigured() && db) {
+    // Distinguish between Cloud Firestore requests and Local-Only Prototype requests
+    const isSampleRequest =
+      Boolean(targetRequest.isSample) ||
+      targetRequest.id.startsWith('req-sample-') ||
+      targetRequest.id.startsWith('sample-');
+    const isLocalGeneratedId =
+      targetRequest.id.startsWith('req-') || targetRequest.id.startsWith('request-');
+    const isKnownInFirestore = firestoreRequests.some((r) => r.id === id);
+
+    const isCloudRequest =
+      isFirebaseConfigured() &&
+      Boolean(db) &&
+      !isSampleRequest &&
+      (isKnownInFirestore || !isLocalGeneratedId);
+
+    if (isCloudRequest && db) {
+      const currentAuthUser = auth?.currentUser;
+      if (!currentAuthUser) {
+        throw new Error(
+          'Authentication required: You must be signed in with your Firebase account to delete cloud requests.'
+        );
+      }
+      if (currentAuthUser.uid !== targetRequest.requesterId) {
+        throw new Error(
+          'Permission denied: Your authenticated Firebase account does not match the requester ID of this request.'
+        );
+      }
       try {
         await deleteDoc(doc(db, 'requests', id));
         setFirestoreRequests((prev) => prev.filter((r) => r.id !== id));
         isPermanent = true;
       } catch (err: any) {
         console.error('Error deleting request from Firestore:', err);
-        throw new Error(err.message || 'Failed to delete request from Firestore database.');
+        const errCode = err?.code || '';
+        const errMsg = err?.message || '';
+        if (errCode === 'permission-denied' || errMsg.toLowerCase().includes('permission')) {
+          throw new Error(
+            'Permission denied by Cloud Firestore: Your published database rules in Firebase Console do not permit deleting this request. Please ensure rules allow the author to delete on /requests/{requestId}.'
+          );
+        }
+        if (errCode === 'not-found' || errMsg.toLowerCase().includes('not found')) {
+          console.warn('Request document not found in Firestore; continuing local cleanup.');
+        } else {
+          throw new Error(err.message || 'Failed to delete request from Firestore database.');
+        }
       }
     }
 

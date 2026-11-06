@@ -19,6 +19,22 @@ export const SetupGuidePage: React.FC = () => {
   const { isFirebaseReady } = useAuth();
   const [copiedEnv, setCopiedEnv] = useState(false);
   const [copiedRules, setCopiedRules] = useState(false);
+  const [copiedStorageRules, setCopiedStorageRules] = useState(false);
+
+  const storageRulesTemplate = `rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Listing item images: Public read, owner-authenticated upload with validation
+    match /listings/{userId}/{fileName} {
+      allow read: if true;
+      allow write: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.contentType.matches('image/(jpeg|png|webp)')
+        && request.resource.size < 5 * 1024 * 1024;
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}`;
 
   const envTemplate = `# .env file for WEARHUB (in project root)
 VITE_FIREBASE_API_KEY=AIzaSy...
@@ -40,35 +56,49 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    // User profiles: Public read, only authenticated owner can create/update
+    // User profiles: strictly private to the account owner
+    // Document ID must equal request.auth.uid and uid field must remain immutable
     match /users/{userId} {
-      allow read: if true;
-      allow create: if isAuthenticated() && request.auth.uid == userId;
-      allow update, delete: if isOwner(userId);
+      allow read, delete: if isOwner(userId);
+      allow create: if isAuthenticated() && request.auth.uid == userId && request.resource.data.uid == userId;
+      allow update: if isOwner(userId) && request.resource.data.uid == resource.data.uid;
     }
 
-    // Listings: Public read, authenticated users can create, only owner can edit/delete
+    // Listings: Public read, authenticated users can create their own, owner can edit/delete
+    // The ownerId field cannot be altered during updates
     match /listings/{listingId} {
       allow read: if true;
       allow create: if isAuthenticated() && request.resource.data.ownerId == request.auth.uid;
-      allow update, delete: if isAuthenticated() && resource.data.ownerId == request.auth.uid;
+      allow update: if isAuthenticated() && 
+        resource.data.ownerId == request.auth.uid &&
+        request.resource.data.ownerId == resource.data.ownerId;
+      allow delete: if isAuthenticated() && resource.data.ownerId == request.auth.uid;
     }
 
-    // Requests: Public read, authenticated users can create, only author can edit/delete
+    // Requests: Public read, authenticated users can create their own, author can edit/delete
+    // The requesterId field cannot be altered during updates
     match /requests/{requestId} {
       allow read: if true;
       allow create: if isAuthenticated() && request.resource.data.requesterId == request.auth.uid;
-      allow update, delete: if isAuthenticated() && resource.data.requesterId == request.auth.uid;
+      allow update: if isAuthenticated() && 
+        resource.data.requesterId == request.auth.uid &&
+        request.resource.data.requesterId == resource.data.requesterId;
+      allow delete: if isAuthenticated() && resource.data.requesterId == request.auth.uid;
 
-      // Responses to requests
+      // Responses to requests: Public read, authenticated responder can create, author can edit/delete
       match /responses/{responseId} {
         allow read: if true;
         allow create: if isAuthenticated() && request.resource.data.responderId == request.auth.uid;
-        allow update, delete: if isAuthenticated() && resource.data.responderId == request.auth.uid;
+        allow update: if isAuthenticated() && 
+          resource.data.responderId == request.auth.uid &&
+          request.resource.data.responderId == resource.data.responderId &&
+          request.resource.data.requestId == resource.data.requestId;
+        allow delete: if isAuthenticated() && resource.data.responderId == request.auth.uid;
       }
     }
 
-    // Borrow requests: Only owner of listing or the requester can read/update
+    // Borrow requests: Only borrower (requester) or lender (owner) can read or update
+    // Critical relational fields (ownerId, requesterId, listingId) are immutable
     match /borrowRequests/{borrowId} {
       allow read: if isAuthenticated() && (
         resource.data.requesterId == request.auth.uid || 
@@ -78,18 +108,31 @@ service cloud.firestore {
       allow update: if isAuthenticated() && (
         resource.data.requesterId == request.auth.uid || 
         resource.data.ownerId == request.auth.uid
-      );
+      ) &&
+        request.resource.data.ownerId == resource.data.ownerId &&
+        request.resource.data.requesterId == resource.data.requesterId &&
+        request.resource.data.listingId == resource.data.listingId;
       allow delete: if isAuthenticated() && resource.data.requesterId == request.auth.uid;
     }
 
-    // Conversations & Messages
+    // Conversations: Strictly restricted to conversation participants
+    // Participant list cannot be manipulated during updates
     match /conversations/{conversationId} {
-      allow read, write: if isAuthenticated() && request.auth.uid in resource.data.participantIds;
+      allow read: if isAuthenticated() && request.auth.uid in resource.data.participantIds;
       allow create: if isAuthenticated() && request.auth.uid in request.resource.data.participantIds;
+      allow update: if isAuthenticated() && 
+        request.auth.uid in resource.data.participantIds &&
+        request.resource.data.participantIds == resource.data.participantIds;
+      allow delete: if false;
 
+      // Messages subcollection: Strictly append-only by verified participants; immutable history
       match /messages/{messageId} {
-        allow read: if isAuthenticated();
-        allow create: if isAuthenticated() && request.resource.data.senderId == request.auth.uid;
+        allow read: if isAuthenticated() && 
+          request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds;
+        allow create: if isAuthenticated() && 
+          request.resource.data.senderId == request.auth.uid &&
+          request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds;
+        allow update, delete: if false;
       }
     }
   }
@@ -282,11 +325,36 @@ service cloud.firestore {
         </pre>
       </section>
 
-      {/* Step 5: Netlify Deployment */}
+      {/* Step 5: Firebase Cloud Storage Rules */}
+      <section className="bg-white p-6 sm:p-8 rounded-3xl border border-neutral-200/90 shadow-2xs space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2 text-sm font-bold text-neutral-900">
+            <span className="w-6 h-6 rounded-full bg-[#12372A] text-white flex items-center justify-center text-xs">
+              5
+            </span>
+            <h3>Enable Cloud Storage & Paste Storage Rules</h3>
+          </div>
+          <button
+            onClick={() => copyToClipboard(storageRulesTemplate, setCopiedStorageRules)}
+            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-neutral-800 text-xs font-semibold"
+          >
+            <Copy className="w-3.5 h-3.5" />
+            <span>{copiedStorageRules ? 'Copied!' : 'Copy Rules'}</span>
+          </button>
+        </div>
+        <p className="text-xs text-neutral-500">
+          In Firebase Console &gt; <strong>Storage</strong> (under Build), click <strong>Get Started</strong> to initialize your storage bucket. Then in the <strong>Rules</strong> tab, paste the rules below to allow authenticated students to upload listing photos (max 5 MB JPEG/PNG/WebP):
+        </p>
+        <pre className="p-4 rounded-2xl bg-neutral-900 text-emerald-300 font-mono text-xs overflow-x-auto max-h-48">
+          {storageRulesTemplate}
+        </pre>
+      </section>
+
+      {/* Step 6: Netlify Deployment */}
       <section className="bg-white p-6 sm:p-8 rounded-3xl border border-neutral-200/90 shadow-2xs space-y-4">
         <div className="flex items-center space-x-2 text-sm font-bold text-neutral-900">
           <span className="w-6 h-6 rounded-full bg-[#12372A] text-white flex items-center justify-center text-xs">
-            5
+            6
           </span>
           <h3>Deploy to Netlify (Live Public URL)</h3>
         </div>

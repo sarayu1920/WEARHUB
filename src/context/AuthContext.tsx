@@ -15,6 +15,7 @@ import {
   setDoc,
   getDoc,
   updateDoc,
+  fetchSignInMethodsForEmail,
 } from '../services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 
@@ -130,7 +131,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       return () => unsubscribe();
     } else {
-      // In preview/demo mode without live Firebase keys
+      // In preview/demo mode without live Firebase keys: restore active session if previously signed in
       const savedActive = sessionStorage.getItem(ACTIVE_USER_KEY) || sessionStorage.getItem('wearhub_demo_user');
       const isLoggedOut = sessionStorage.getItem(LOGGED_OUT_KEY);
 
@@ -140,11 +141,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } catch {
           setCurrentUser(null);
         }
-      } else if (!isLoggedOut) {
-        // By default, start with Arjun Verma on initial exploration
-        setCurrentUser(DEMO_USERS[0]);
-        sessionStorage.setItem(ACTIVE_USER_KEY, JSON.stringify(DEMO_USERS[0]));
       } else {
+        // Visitors start as logged-out guests and must sign in
         setCurrentUser(null);
       }
       setLoading(false);
@@ -235,8 +233,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const matched = allPreviewUsers.find((u) => u.email.toLowerCase() === emailNormalized);
 
         if (!matched) {
-          const err: any = new Error('Invalid email or password. Please check your credentials and try again.');
-          err.code = 'auth/invalid-credential';
+          const err: any = new Error("You’re not registered yet. Please create an account to continue.");
+          err.code = 'auth/user-not-found';
+          throw err;
+        }
+
+        // Support testing wrong password simulation in Preview Mode
+        if (
+          password.toLowerCase() === 'wrong' ||
+          password.toLowerCase() === 'wrongpassword' ||
+          password.toLowerCase() === 'incorrect'
+        ) {
+          const err: any = new Error('Incorrect email or password. Please try again.');
+          err.code = 'auth/wrong-password';
           throw err;
         }
 
@@ -247,24 +256,61 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       // Live Firebase authentication
-      const cred = await signInWithEmailAndPassword(auth, emailNormalized, password);
-      const userDocRef = doc(db, 'users', cred.user.uid);
-      const userDoc = await getDoc(userDocRef);
+      try {
+        const cred = await signInWithEmailAndPassword(auth, emailNormalized, password);
+        const userDocRef = doc(db, 'users', cred.user.uid);
+        const userDoc = await getDoc(userDocRef);
 
-      if (userDoc.exists()) {
-        setCurrentUser(userDoc.data() as UserProfile);
-      } else {
-        // Fallback profile if user document doesn't exist
-        const fallbackProfile: UserProfile = {
-          uid: cred.user.uid,
-          email: cred.user.email || emailNormalized,
-          displayName: cred.user.displayName || emailNormalized.split('@')[0],
-          homeUniversity: 'VIT-AP University',
-          savedListingIds: [],
-          createdAt: new Date().toISOString(),
-        };
-        await setDoc(userDocRef, fallbackProfile);
-        setCurrentUser(fallbackProfile);
+        if (userDoc.exists()) {
+          setCurrentUser(userDoc.data() as UserProfile);
+        } else {
+          // Fallback profile if user document doesn't exist
+          const fallbackProfile: UserProfile = {
+            uid: cred.user.uid,
+            email: cred.user.email || emailNormalized,
+            displayName: cred.user.displayName || emailNormalized.split('@')[0],
+            homeUniversity: 'VIT-AP University',
+            savedListingIds: [],
+            createdAt: new Date().toISOString(),
+          };
+          await setDoc(userDocRef, fallbackProfile);
+          setCurrentUser(fallbackProfile);
+        }
+      } catch (fbErr: any) {
+        const fbCode = fbErr?.code || '';
+
+        // If Firebase specifically identifies user-not-found, pass it through directly
+        if (fbCode === 'auth/user-not-found') {
+          const unregisteredErr: any = new Error("You’re not registered yet. Please create an account to continue.");
+          unregisteredErr.code = 'auth/user-not-found';
+          throw unregisteredErr;
+        }
+
+        // If Firebase returned generic invalid credential (auth/invalid-credential or auth/invalid-login-credentials),
+        // probe sign-in methods to verify if the email is registered
+        if (fbCode === 'auth/invalid-credential' || fbCode === 'auth/invalid-login-credentials') {
+          try {
+            const methods = await fetchSignInMethodsForEmail(auth, emailNormalized);
+            if (methods && methods.length === 0) {
+              const unregisteredErr: any = new Error("You’re not registered yet. Please create an account to continue.");
+              unregisteredErr.code = 'auth/user-not-found';
+              throw unregisteredErr;
+            } else if (methods && methods.length > 0) {
+              const wrongPassErr: any = new Error('Incorrect email or password. Please try again.');
+              wrongPassErr.code = 'auth/wrong-password';
+              throw wrongPassErr;
+            }
+          } catch (probeErr: any) {
+            if (probeErr?.code === 'auth/user-not-found') {
+              const unregisteredErr: any = new Error("You’re not registered yet. Please create an account to continue.");
+              unregisteredErr.code = 'auth/user-not-found';
+              throw unregisteredErr;
+            }
+            // If probe error occurs or email enumeration protection is enforced, keep original fbErr
+          }
+        }
+
+        throw fbErr;
       }
     } finally {
       setLoading(false);
